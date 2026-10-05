@@ -1,9 +1,8 @@
 import MiniSearch from "minisearch";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import { type ConceptRecord, parseConcept } from "../okf/concept.js";
 import { type Status, type TrustTier, isStale } from "../okf/semantics.js";
-import { walkBundle } from "./bundle.js";
+import type { BundleSource } from "./backend.js";
+import { isConceptPath } from "./bundle.js";
 
 export interface SearchParams {
   query?: string;
@@ -75,15 +74,13 @@ function extractSnippet(body: string, terms: string[], description: string | nul
 }
 
 export class Catalog {
-  private repoDir?: string;
   private readonly miniSearch: MiniSearch<IndexedDoc>;
   // project -> (id -> ConceptRecord)
   private readonly projectRecords = new Map<string, Map<string, ConceptRecord>>();
   // project -> (targetId -> Set<sourceId>)
   private readonly inboundLinks = new Map<string, Map<string, Set<string>>>();
 
-  constructor(repoDir?: string) {
-    this.repoDir = repoDir;
+  constructor() {
     this.miniSearch = new MiniSearch<IndexedDoc>({
       idField: "key",
       fields: ["title", "description", "tags", "type", "idText", "body"],
@@ -96,27 +93,20 @@ export class Catalog {
     });
   }
 
-  setRepoDir(dir: string): void {
-    this.repoDir = dir;
-  }
-
-  async rebuildProject(project: string): Promise<void> {
+  async rebuildProject(project: string, source: BundleSource): Promise<void> {
     this.removeProject(project);
 
-    if (!this.repoDir) {
-      return;
-    }
-
-    const projectDir = join(this.repoDir, project);
-    const walk = await walkBundle(projectDir);
-
-    for (const file of walk.conceptFiles) {
-      const absPath = join(projectDir, file);
+    for (const file of source.paths) {
+      if (!isConceptPath(file)) {
+        continue;
+      }
       try {
-        const buf = await readFile(absPath);
+        const buf = await source.read(file);
+        if (buf === null) {
+          continue;
+        }
         const id = file.endsWith(".md") ? file.slice(0, -3) : file;
-        const record = parseConcept(project, id, file, buf);
-        this.storeRecord(record);
+        this.storeRecord(parseConcept(project, id, file, buf));
       } catch {
         // ignore unreadable file during rebuild
       }
@@ -137,21 +127,8 @@ export class Catalog {
     this.inboundLinks.delete(project);
   }
 
-  async upsert(project: string, id: string, record?: ConceptRecord): Promise<void> {
-    if (record) {
-      this.storeRecord(record);
-      return;
-    }
-
-    if (!this.repoDir) {
-      return;
-    }
-
-    const file = `${id}.md`;
-    const absPath = join(this.repoDir, project, file);
-    const buf = await readFile(absPath);
-    const parsed = parseConcept(project, id, file, buf);
-    this.storeRecord(parsed);
+  upsert(record: ConceptRecord): void {
+    this.storeRecord(record);
   }
 
   private storeRecord(record: ConceptRecord): void {

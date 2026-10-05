@@ -1,144 +1,213 @@
-import { readFile, readdir, rm, rmdir } from "node:fs/promises";
-import { join, posix } from "node:path";
+import { posix } from "node:path";
 import { type DirListing, renderIndex } from "../okf/index-file.js";
 import { type LintIssue, lintConceptFile, lintIndexFile, lintLogFile } from "../okf/lint.js";
 import { isReservedName } from "../okf/paths.js";
-import { parseConcept, type ConceptRecord } from "../okf/concept.js";
+import type { ConceptRecord } from "../okf/concept.js";
 import { displayTitle } from "../okf/semantics.js";
-import { atomicWrite, isDirectory, pathExists } from "./fs-util.js";
+import type { BundleSource } from "./backend.js";
 
-export interface BundleWalk {
-  conceptFiles: string[];
-  otherFiles: string[];
+/** True for non-reserved `.md` files, i.e. files that hold a concept. */
+export function isConceptPath(path: string): boolean {
+  const name = posix.basename(path);
+  return !isReservedName(name) && name.toLowerCase().endsWith(".md");
+}
+
+interface DirEntries {
+  files: string[];
   dirs: string[];
 }
 
-export async function walkBundle(projectDir: string): Promise<BundleWalk> {
-  const conceptFiles: string[] = [];
-  const otherFiles: string[] = [];
-  const dirs: string[] = [];
-
-  async function walk(currentRel: string): Promise<void> {
-    const currentAbs = currentRel === "" ? projectDir : join(projectDir, currentRel);
-    let entries: string[];
-    try {
-      entries = await readdir(currentAbs);
-    } catch {
-      return;
-    }
-
-    for (const name of entries) {
-      if (name.startsWith(".")) {
-        continue;
-      }
-      const relPath = currentRel === "" ? name : posix.join(currentRel, name);
-      const absPath = join(projectDir, relPath);
-
-      if (await isDirectory(absPath)) {
-        dirs.push(relPath);
-        await walk(relPath);
-      } else {
-        if (isReservedName(name)) {
-          continue;
-        }
-        if (name.toLowerCase().endsWith(".md")) {
-          conceptFiles.push(relPath);
-        } else {
-          otherFiles.push(relPath);
-        }
-      }
-    }
-  }
-
-  await walk("");
-  return { conceptFiles, otherFiles, dirs };
+interface DirCounts {
+  conceptCount: number;
+  fileCount: number;
 }
 
-export async function buildDirListing(
-  projectDir: string,
+const NO_ENTRIES: DirEntries = Object.freeze({ files: [], dirs: [] }) as DirEntries;
+const NO_COUNTS: DirCounts = Object.freeze({ conceptCount: 0, fileCount: 0 });
+
+function parentDir(path: string): string {
+  const parent = posix.dirname(path);
+  return parent === "." ? "" : parent;
+}
+
+function normalizeDir(dir: string): string {
+  return dir === "." || dir === "/" ? "" : dir.replace(/^\/+|\/+$/g, "");
+}
+
+/** Immutable file/directory model of one bundle, built from its file paths (including index.md/log.md). */
+export class BundleTree {
+  static readonly EMPTY = new BundleTree([]);
+
+  readonly paths: readonly string[];
+  readonly conceptFiles: readonly string[];
+  readonly otherFiles: readonly string[];
+  readonly dirs: readonly string[];
+
+  private readonly fileSet: ReadonlySet<string>;
+  private readonly dirSet: ReadonlySet<string>;
+  private readonly dirEntries = new Map<string, DirEntries>();
+  private readonly dirCounts = new Map<string, DirCounts>();
+
+  constructor(paths: Iterable<string>) {
+    const sorted = Array.from(new Set(paths)).sort();
+    const conceptFiles: string[] = [];
+    const otherFiles: string[] = [];
+    const dirSet = new Set<string>();
+
+    for (const path of sorted) {
+      const name = posix.basename(path);
+      const reserved = isReservedName(name);
+      const isConcept = !reserved && name.toLowerCase().endsWith(".md");
+      if (isConcept) {
+        conceptFiles.push(path);
+      } else if (!reserved) {
+        otherFiles.push(path);
+      }
+
+      let dir = parentDir(path);
+      this.entriesFor(dir).files.push(name);
+      while (true) {
+        if (!reserved) {
+          const counts = this.dirCounts.get(dir) ?? { conceptCount: 0, fileCount: 0 };
+          if (isConcept) {
+            counts.conceptCount++;
+          } else {
+            counts.fileCount++;
+          }
+          this.dirCounts.set(dir, counts);
+        }
+        if (dir === "") {
+          break;
+        }
+        if (!dirSet.has(dir)) {
+          // First sighting: register dir as a child of its parent.
+          dirSet.add(dir);
+          this.entriesFor(parentDir(dir)).dirs.push(posix.basename(dir));
+        }
+        dir = parentDir(dir);
+      }
+    }
+
+    this.paths = sorted;
+    this.conceptFiles = conceptFiles;
+    this.otherFiles = otherFiles;
+    this.fileSet = new Set(sorted);
+    this.dirSet = dirSet;
+    this.dirs = Array.from(dirSet).sort();
+  }
+
+  private entriesFor(dir: string): DirEntries {
+    let entries = this.dirEntries.get(dir);
+    if (!entries) {
+      entries = { files: [], dirs: [] };
+      this.dirEntries.set(dir, entries);
+    }
+    return entries;
+  }
+
+  get isEmpty(): boolean {
+    return this.paths.length === 0;
+  }
+
+  hasFile(path: string): boolean {
+    return this.fileSet.has(path);
+  }
+
+  hasDir(dir: string): boolean {
+    return dir === "" ? !this.isEmpty : this.dirSet.has(dir);
+  }
+
+  /** Direct-child basenames of `dir` ("" = root). */
+  entries(dir: string): Readonly<DirEntries> {
+    return this.dirEntries.get(dir) ?? NO_ENTRIES;
+  }
+
+  /** Recursive counts of non-reserved files below `dir`. */
+  counts(dir: string): Readonly<DirCounts> {
+    return this.dirCounts.get(dir) ?? NO_COUNTS;
+  }
+
+  /** True for an existing file or directory addressed by a bundle path that stays inside the bundle. */
+  exists(bundlePath: string): boolean {
+    let normalized = posix.normalize(bundlePath.replace(/^\/+/, ""));
+    if (normalized === ".." || normalized.startsWith("../")) return false;
+    if (normalized === "." || normalized === "./") return !this.isEmpty;
+    normalized = normalized.replace(/\/+$/, "");
+    return this.fileSet.has(normalized) || this.dirSet.has(normalized);
+  }
+}
+
+export function buildDirListing(
+  tree: BundleTree,
   relDir: string,
   catalogLookup: (id: string) => ConceptRecord | undefined
-): Promise<DirListing> {
-  const normRelDir = relDir === "." || relDir === "/" ? "" : relDir.replace(/^\/+|\/+$/g, "");
+): DirListing {
+  const normRelDir = normalizeDir(relDir);
   const isRoot = normRelDir === "";
-  const dirAbs = isRoot ? projectDir : join(projectDir, normRelDir);
-
-  let entries: string[] = [];
-  try {
-    entries = await readdir(dirAbs);
-  } catch {
-    // Return empty listing if directory cannot be read
-  }
+  const entries = tree.entries(normRelDir);
 
   const concepts: DirListing["concepts"] = [];
   const files: string[] = [];
   const dirs: DirListing["dirs"] = [];
 
-  for (const name of entries) {
-    if (name.startsWith(".")) {
+  for (const name of entries.files) {
+    if (isReservedName(name)) {
       continue;
     }
     const itemRel = isRoot ? name : posix.join(normRelDir, name);
-    const itemAbs = join(projectDir, itemRel);
-
-    if (await isDirectory(itemAbs)) {
-      // Compute recursive concept and file counts
-      const subWalk = await walkBundle(itemAbs);
-      dirs.push({
-        name,
-        conceptCount: subWalk.conceptFiles.length,
-        fileCount: subWalk.otherFiles.length,
+    if (name.toLowerCase().endsWith(".md")) {
+      const conceptId = itemRel.slice(0, -3);
+      const record = catalogLookup(conceptId);
+      concepts.push({
+        file: name,
+        title: record?.title ?? displayTitle(null, conceptId),
+        description: record?.description ?? null,
+        type: record?.type ?? null,
       });
     } else {
-      if (isReservedName(name)) {
-        continue;
-      }
-      if (name.toLowerCase().endsWith(".md")) {
-        const conceptId = itemRel.slice(0, -3);
-        const record = catalogLookup(conceptId);
-        concepts.push({
-          file: name,
-          title: record?.title ?? displayTitle(null, conceptId),
-          description: record?.description ?? null,
-          type: record?.type ?? null,
-        });
-      } else {
-        files.push(name);
-      }
+      files.push(name);
     }
+  }
+
+  for (const name of entries.dirs) {
+    const counts = tree.counts(isRoot ? name : posix.join(normRelDir, name));
+    // Dirs without non-reserved files are pruned by index regeneration, so they are never listed.
+    if (counts.conceptCount + counts.fileCount === 0) {
+      continue;
+    }
+    dirs.push({ name, conceptCount: counts.conceptCount, fileCount: counts.fileCount });
   }
 
   return { isRoot, concepts, files, dirs };
 }
 
-export async function regenerateIndexes(
-  projectDir: string,
+/**
+ * Plans index.md changes for `dirs` (plus their ancestors) or every dir. `content: null` means delete.
+ * Ordered deepest-first so a child's deletion (which prunes its dir) precedes its parent.
+ */
+export function planIndexes(
+  tree: BundleTree,
   dirs: string[] | "all",
   lookup: (id: string) => ConceptRecord | undefined
-): Promise<string[]> {
-  const changedPaths: string[] = [];
+): Array<{ path: string; content: string | null }> {
+  if (tree.isEmpty) {
+    return [];
+  }
 
   let targetDirs: Set<string>;
   if (dirs === "all") {
-    const walk = await walkBundle(projectDir);
-    targetDirs = new Set(["", ...walk.dirs]);
+    targetDirs = new Set(["", ...tree.dirs]);
   } else {
-    targetDirs = new Set<string>();
+    targetDirs = new Set<string>([""]);
     for (const d of dirs) {
-      let current = d === "." || d === "/" ? "" : d.replace(/^\/+|\/+$/g, "");
-      while (true) {
+      let current = normalizeDir(d);
+      while (current !== "") {
         targetDirs.add(current);
-        if (current === "") {
-          break;
-        }
-        const parent = posix.dirname(current);
-        current = parent === "." ? "" : parent;
+        current = parentDir(current);
       }
     }
-    targetDirs.add("");
   }
 
-  // Process deepest directories first
   const sorted = Array.from(targetDirs).sort((a, b) => {
     const depthA = a === "" ? 0 : a.split("/").length;
     const depthB = b === "" ? 0 : b.split("/").length;
@@ -148,64 +217,34 @@ export async function regenerateIndexes(
     return b.localeCompare(a);
   });
 
+  const plan: Array<{ path: string; content: string | null }> = [];
   for (const dir of sorted) {
-    const dirAbs = dir === "" ? projectDir : join(projectDir, dir);
-    if (!(await pathExists(dirAbs))) {
-      continue;
-    }
-
-    const indexPath = join(dirAbs, "index.md");
-    const relIndexPath = dir === "" ? "index.md" : posix.join(dir, "index.md");
-
-    // Check if directory has any non-reserved files recursively
-    const walk = await walkBundle(dirAbs);
-    const hasFiles = walk.conceptFiles.length > 0 || walk.otherFiles.length > 0;
-
-    if (!hasFiles && dir !== "") {
-      if (await pathExists(indexPath)) {
-        await rm(indexPath, { force: true });
-        changedPaths.push(relIndexPath);
+    const indexPath = dir === "" ? "index.md" : `${dir}/index.md`;
+    if (dir !== "") {
+      if (!tree.hasDir(dir)) {
+        continue;
       }
-      // Prune directory if completely empty
-      try {
-        const remaining = await readdir(dirAbs);
-        if (remaining.length === 0) {
-          await rmdir(dirAbs);
+      const counts = tree.counts(dir);
+      if (counts.conceptCount + counts.fileCount === 0) {
+        if (tree.hasFile(indexPath)) {
+          plan.push({ path: indexPath, content: null });
         }
-      } catch {
-        // ignore rmdir errors
+        continue;
       }
-      continue;
     }
-
-    const listing = await buildDirListing(projectDir, dir, lookup);
-    const rendered = renderIndex(listing);
-
-    let existingContent: string | null = null;
-    try {
-      existingContent = await readFile(indexPath, "utf8");
-    } catch {
-      // index.md does not exist yet
-    }
-
-    if (existingContent !== rendered) {
-      await atomicWrite(indexPath, rendered);
-      changedPaths.push(relIndexPath);
-    }
+    plan.push({ path: indexPath, content: renderIndex(buildDirListing(tree, dir, lookup)) });
   }
-
-  return changedPaths;
+  return plan;
 }
 
 export async function lintBundle(
-  bundleDir: string,
+  source: BundleSource,
   now: Date
 ): Promise<{ conformant: boolean; issues: LintIssue[] }> {
   const issues: LintIssue[] = [];
-
-  const walk = await walkBundle(bundleDir);
-  const conceptIdSet = new Set(walk.conceptFiles.map((f) => f.slice(0, -3)));
-  const allBundleFiles = new Set<string>([...walk.conceptFiles, ...walk.otherFiles]);
+  const tree = new BundleTree(source.paths);
+  const conceptIdSet = new Set(tree.conceptFiles.map((f) => f.slice(0, -3)));
+  const allBundleFiles = new Set<string>([...tree.conceptFiles, ...tree.otherFiles]);
 
   const ctx = {
     now,
@@ -213,26 +252,22 @@ export async function lintBundle(
     fileExists: (relPath: string) => allBundleFiles.has(relPath),
   };
 
-  // Lint concepts
-  for (const cFile of walk.conceptFiles) {
-    const absPath = join(bundleDir, cFile);
-    try {
-      const text = await readFile(absPath, "utf8");
-      const cIssues = lintConceptFile(cFile, text, ctx);
-      issues.push(...cIssues);
-    } catch {
-      // ignore read error
+  const readText = async (path: string): Promise<string | null> => {
+    const buf = await source.read(path);
+    return buf === null ? null : buf.toString("utf8");
+  };
+
+  for (const cFile of tree.conceptFiles) {
+    const text = await readText(cFile);
+    if (text !== null) {
+      issues.push(...lintConceptFile(cFile, text, ctx));
     }
   }
 
-  // Lint index.md files
-  const rootIndexAbs = join(bundleDir, "index.md");
-  if (await pathExists(rootIndexAbs)) {
-    try {
-      const text = await readFile(rootIndexAbs, "utf8");
+  if (tree.hasFile("index.md")) {
+    const text = await readText("index.md");
+    if (text !== null) {
       issues.push(...lintIndexFile("index.md", text, true));
-    } catch {
-      // ignore
     }
   } else {
     issues.push({
@@ -243,26 +278,20 @@ export async function lintBundle(
     });
   }
 
-  for (const d of walk.dirs) {
-    const subIndexAbs = join(bundleDir, d, "index.md");
-    if (await pathExists(subIndexAbs)) {
-      try {
-        const text = await readFile(subIndexAbs, "utf8");
-        issues.push(...lintIndexFile(posix.join(d, "index.md"), text, false));
-      } catch {
-        // ignore
+  for (const d of tree.dirs) {
+    const subIndex = `${d}/index.md`;
+    if (tree.hasFile(subIndex)) {
+      const text = await readText(subIndex);
+      if (text !== null) {
+        issues.push(...lintIndexFile(subIndex, text, false));
       }
     }
   }
 
-  // Lint log.md files
-  const rootLogAbs = join(bundleDir, "log.md");
-  if (await pathExists(rootLogAbs)) {
-    try {
-      const text = await readFile(rootLogAbs, "utf8");
+  if (tree.hasFile("log.md")) {
+    const text = await readText("log.md");
+    if (text !== null) {
       issues.push(...lintLogFile("log.md", text));
-    } catch {
-      // ignore
     }
   }
 

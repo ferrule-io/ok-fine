@@ -8,7 +8,7 @@ import * as tar from "tar";
 import { loadConfig, type Config, type Logger } from "../config.js";
 import { OkfError } from "../errors.js";
 import { Catalog } from "../store/catalog.js";
-import { Repo } from "../store/repo.js";
+import { GitBackend } from "../store/git-backend.js";
 import { KnowledgeService } from "./knowledge-service.js";
 import type { Principal } from "./principal.js";
 
@@ -47,6 +47,7 @@ describe("KnowledgeService", () => {
 
   async function setupService(extraEnv: Record<string, string> = {}): Promise<{
     service: KnowledgeService;
+    storage: GitBackend;
     dataDir: string;
     config: Config;
   }> {
@@ -58,11 +59,11 @@ describe("KnowledgeService", () => {
       LOG_LEVEL: "silent",
       ...extraEnv,
     });
-    const repo = await Repo.open(config, mockLogger);
+    const storage = await GitBackend.open(config, mockLogger);
     const catalog = new Catalog();
-    const service = new KnowledgeService({ config, repo, catalog, log: mockLogger });
+    const service = new KnowledgeService({ config, storage, catalog, log: mockLogger });
     await service.initialize();
-    return { service, dataDir, config };
+    return { service, storage, dataDir, config };
   }
 
   it("per-concept lint reports a missing computation file until the file is written", async () => {
@@ -488,7 +489,7 @@ describe("KnowledgeService", () => {
     const bareDir = await createTempDir();
     execSync("git init --bare -b main", { cwd: bareDir });
 
-    const { service, dataDir } = await setupService({
+    const { service, storage, dataDir } = await setupService({
       GIT_REMOTE_URL: bareDir,
     });
 
@@ -541,7 +542,7 @@ description: External orders
 
     // 3. Conflict handling
     // Break origin URL in local git to prevent push
-    await service.repo.git.run(["remote", "set-url", "origin", "/nonexistent/repo.git"]);
+    await storage.git.run(["remote", "set-url", "origin", "/nonexistent/repo.git"]);
 
     // Write concept X locally (push fails, but local commit succeeds)
     const writeX = await service.writeConcept(alice, {
@@ -555,7 +556,7 @@ description: External orders
     expect(writeX.warnings.some((w) => w.startsWith("push failed"))).toBe(true);
 
     // Restore origin URL
-    await service.repo.git.run(["remote", "set-url", "origin", bareDir]);
+    await storage.git.run(["remote", "set-url", "origin", bareDir]);
 
     // Pull external clone up to date with remote
     execSync("git pull --rebase origin main", { cwd: extDir });
@@ -592,8 +593,8 @@ title: Remote X
     );
 
     // Local HEAD is now equal to origin/main, and the catalog reflects the remote version
-    const localHead = (await service.repo.git.run(["rev-parse", "HEAD"])).stdout.trim();
-    const originMain = (await service.repo.git.run(["rev-parse", "origin/main"])).stdout.trim();
+    const localHead = (await storage.git.run(["rev-parse", "HEAD"])).stdout.trim();
+    const originMain = (await storage.git.run(["rev-parse", "origin/main"])).stdout.trim();
     expect(localHead).toBe(originMain);
     const afterSync = await service.readConcept("alpha", "concept-x");
     expect(afterSync.derived?.title).toBe("Remote X");
@@ -601,7 +602,7 @@ title: Remote X
   });
 
   it("archive: export -> import roundtrips concepts, rejects invalid archives without modifying state", async () => {
-    const { service } = await setupService();
+    const { service, storage } = await setupService();
 
     await service.createProject(alice, {
       project: "source",
@@ -668,8 +669,8 @@ title: Remote X
       return gzipSync(tarBuf);
     }
 
-    const headBefore = (await service.repo.git.run(["rev-parse", "HEAD"])).stdout.trim();
-    const targetFilesBefore = execSync("git ls-files target", { cwd: service.repo.repoDir }).toString("utf8");
+    const headBefore = (await storage.git.run(["rev-parse", "HEAD"])).stdout.trim();
+    const targetFilesBefore = execSync("git ls-files target", { cwd: storage.repoDir }).toString("utf8");
 
     const badTraversalBuf = createTarWithEntry("../evil.md");
     await expect(
@@ -729,9 +730,9 @@ title: Remote X
     });
 
     // Nothing changed: no commit, same tracked files, catalog intact, no staging leftovers
-    expect((await service.repo.git.run(["rev-parse", "HEAD"])).stdout.trim()).toBe(headBefore);
-    expect(execSync("git ls-files target", { cwd: service.repo.repoDir }).toString("utf8")).toBe(targetFilesBefore);
-    expect(execSync("git status --porcelain", { cwd: service.repo.repoDir }).toString("utf8")).toBe("");
+    expect((await storage.git.run(["rev-parse", "HEAD"])).stdout.trim()).toBe(headBefore);
+    expect(execSync("git ls-files target", { cwd: storage.repoDir }).toString("utf8")).toBe(targetFilesBefore);
+    expect(execSync("git status --porcelain", { cwd: storage.repoDir }).toString("utf8")).toBe("");
     expect(service.catalog.get("target", "tables/customers")).toBeDefined();
     expect(await readdir(join(service.config.dataDir, "tmp"))).toEqual([]);
   });
