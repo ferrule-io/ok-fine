@@ -446,6 +446,7 @@ See [`values.yaml`](charts/ok-fine/values.yaml) for the full list. `helm test ok
 mise install          # Node 24, pnpm 11
 pnpm install
 pnpm typecheck
+pnpm lint             # biome lint; warnings fail
 pnpm test             # unit, service (real git in temp dirs), and end-to-end suites
 pnpm build
 ```
@@ -466,7 +467,7 @@ Layout:
 
 ## CI and releases
 
-- **Push to `development`** runs `.github/workflows/ci.yml`: `pnpm typecheck`, `pnpm test`, `pnpm build`, `helm lint --strict`, and Docker builds for `amd64` and `arm64` on native runners.
+- **Push to `development`** and **PRs into `development`/`main`** run `.github/workflows/ci.yml`: `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, `helm lint --strict`, and (pushes only) Docker builds for `amd64` and `arm64` on native runners.
 - **Push to `main`** runs `.github/workflows/release.yml`: runs CI, then the release job computes next version (minor+1 over max of `Chart.yaml` version and latest `vX.Y.Z` tag), commits `chore(release): vX.Y.Z` to `main` bumping `charts/ok-fine/Chart.yaml` (version + appVersion), `package.json`, `src/version.ts`, and the agent manifests (`agents/package.json`, `agents/plugin.json`, `agents/gemini-extension.json`, `agents/.claude-plugin/plugin.json`), tags it, builds the per-arch images natively and merges them into a multi-arch manifest (tags `X.Y.Z`, `sha-<short>`, and `latest` only when it is the highest release), pushes the chart to `oci://ghcr.io/ferrule-io/charts`, then merges the release commit back into `development` (fails rather than force-pushing on conflict). Reruns reuse the existing release commit/tag.
 - **Agent package:** the `agents` job replaces the contents of `ferrule-io/ok-fine-agents` with `agents/` plus `LICENSE`, commits, tags `vX.Y.Z`, and pushes (to `main` only when it is the highest release). The mirror is generated output; edit `agents/` here. Reruns skip an existing tag.
 - **One release per run of pushes:** releases are serialized (`concurrency: release`). A push that lands while a release is running supersedes older queued pushes, and a run whose commit is no longer `main`'s head fails with `main moved past <sha>`; the newest push releases everything since the last tag, with a single minor bump.

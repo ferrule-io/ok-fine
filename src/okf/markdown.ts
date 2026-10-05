@@ -76,8 +76,7 @@ export function extractFootnoteLabels(body: string): string[] {
     }
     if ("raw" in token && typeof token.raw === "string") {
       const re = new RegExp(FOOTNOTE_RE.source, "g");
-      let match: RegExpExecArray | null;
-      while ((match = re.exec(token.raw)) !== null) {
+      for (const match of token.raw.matchAll(re)) {
         if (match[1]) {
           labels.add(match[1]);
         }

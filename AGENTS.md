@@ -8,12 +8,14 @@ Guidance for coding agents working on this repository. User-facing documentation
 mise install            # Node 24, pnpm 11
 pnpm install
 pnpm typecheck          # tsc --noEmit over src/, test/, agents/, vitest.config.ts
+pnpm lint               # biome lint (biome.json); warnings fail too
 pnpm test               # vitest: unit, service (real git), end-to-end
 pnpm build              # emits dist/
 pnpm exec vitest run src/service   # one suite
 ```
 
-Run `pnpm typecheck && pnpm test` before you finish any change. For chart changes, also run
+Run `pnpm typecheck && pnpm lint && pnpm test` before you finish any change, and before opening a PR: CI gates PRs
+on all three. For chart changes, also run
 `helm lint --strict charts/ok-fine --set config.publicBaseUrl=https://okf.example.com --set oauth.issuer=https://idp.example.com`.
 
 ## Layout and layering

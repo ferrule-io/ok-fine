@@ -34,10 +34,9 @@ export function renderIndex(listing: DirListing): string {
     list.push({ file: c.file, title: c.title, description: c.description });
   }
 
-  const sortedTypes = Array.from(byType.keys()).sort((a, b) => a.localeCompare(b, "en"));
+  const sortedTypes = Array.from(byType).sort(([a], [b]) => a.localeCompare(b, "en"));
 
-  for (const type of sortedTypes) {
-    const items = byType.get(type)!;
+  for (const [type, items] of sortedTypes) {
     items.sort((a, b) => {
       const titleCmp = a.title.toLowerCase().localeCompare(b.title.toLowerCase(), "en");
       if (titleCmp !== 0) {
@@ -90,11 +89,11 @@ export function renderIndex(listing: DirListing): string {
   if (sections.length === 0) {
     body = "# Concepts\n";
   } else {
-    body = sections.join("\n\n") + "\n";
+    body = `${sections.join("\n\n")}\n`;
   }
 
   if (listing.isRoot) {
-    return `---\nokf_version: "0.2"\n---\n\n` + body;
+    return `---\nokf_version: "0.2"\n---\n\n${body}`;
   }
   return body;
 }

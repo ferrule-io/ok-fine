@@ -49,7 +49,7 @@ export function serializeConcept(doc: Document, body: string): string {
     .replace(/\r\n/g, "\n")
     .replace(/^\n+/, "")
     .replace(/\s*$/, "");
-  return "---\n" + doc.toString({ lineWidth: 0 }) + "---\n\n" + normalizedBody + "\n";
+  return `---\n${doc.toString({ lineWidth: 0 })}---\n\n${normalizedBody}\n`;
 }
 
 function createFormattedNode(doc: Document, key: string, val: unknown): unknown {

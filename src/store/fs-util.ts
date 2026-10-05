@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { Dirent } from "node:fs";
 import { access, mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { BundleSource } from "./backend.js";
@@ -36,7 +37,7 @@ export async function isDirectory(absPath: string): Promise<boolean> {
 export async function listTreeFiles(rootDir: string): Promise<string[]> {
   const files: string[] = [];
   async function walk(rel: string): Promise<void> {
-    let entries;
+    let entries: Dirent[];
     try {
       entries = await readdir(rel === "" ? rootDir : join(rootDir, rel), { withFileTypes: true });
     } catch {

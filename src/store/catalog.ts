@@ -275,10 +275,9 @@ export class Catalog {
       return true;
     };
 
-    const hasQuery = Boolean(params.query && params.query.trim().length > 0);
+    const q = params.query?.trim() ?? "";
 
-    if (hasQuery) {
-      const q = params.query!.trim();
+    if (q.length > 0) {
       const rawHits = this.miniSearch.search(q);
       const results: SearchHit[] = [];
 

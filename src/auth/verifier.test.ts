@@ -44,8 +44,8 @@ describe("OAuth authentication and verification", () => {
       expect(authInfo.clientId).toBe("dev-client");
       expect(authInfo.scopes).toContain("okf:read");
       expect(authInfo.scopes).toContain("okf:write");
-      expect(authInfo.extra?.["identity"]).toBe("dev");
-      expect(authInfo.extra?.["sub"]).toBe("dev|dev");
+      expect(authInfo.extra?.identity).toBe("dev");
+      expect(authInfo.extra?.sub).toBe("dev|dev");
       expect(typeof authInfo.expiresAt).toBe("number");
     });
 
@@ -132,7 +132,7 @@ describe("OAuth authentication and verification", () => {
   describe("discoverAuthorizationServer", () => {
     it("discovers metadata and jwks_uri from dev issuer", async () => {
       const discovered = await discoverAuthorizationServer(devIssuer.url);
-      expect(discovered.metadata["issuer"]).toBe(devIssuer.url);
+      expect(discovered.metadata.issuer).toBe(devIssuer.url);
       expect(discovered.jwksUri).toBe(`${devIssuer.url}/jwks`);
     });
   });
