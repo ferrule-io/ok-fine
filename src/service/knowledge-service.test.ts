@@ -1,11 +1,11 @@
-import { describe, it, expect, afterEach } from "vitest";
 import { execSync } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import * as tar from "tar";
-import { loadConfig, type Config, type Logger } from "../config.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { type Config, type Logger, loadConfig } from "../config.js";
 import { OkfError } from "../errors.js";
 import { Catalog } from "../store/catalog.js";
 import { GitBackend } from "../store/git-backend.js";
@@ -107,7 +107,11 @@ describe("KnowledgeService", () => {
     }
     expect(await readFile(join(dataDir, "canary.txt"), "utf8")).toBe("keep");
     expect(await readFile(join(dataDir, "repo", "outside.txt"), "utf8")).toBe("keep");
-    expect(execSync("git rev-list --count HEAD", { cwd: join(dataDir, "repo") }).toString().trim()).toBe("1");
+    expect(
+      execSync("git rev-list --count HEAD", { cwd: join(dataDir, "repo") })
+        .toString()
+        .trim(),
+    ).toBe("1");
   });
 
   it("listProjects returns bound repositories and filters by normalized git remote", async () => {
@@ -181,10 +185,11 @@ describe("KnowledgeService", () => {
     expect(logContent).toContain("**Creation**: Added [Customer Orders](/tables/orders.md) (by agent/test-1.0).");
 
     // 6. Check git log author and trailers
-    const gitLog = execSync(
-      `git log -1 --format="%an%n%(trailers:key=Okf-Principal,valueonly)"`,
-      { cwd: join(dataDir, "repo") }
-    ).toString("utf8").trim();
+    const gitLog = execSync(`git log -1 --format="%an%n%(trailers:key=Okf-Principal,valueonly)"`, {
+      cwd: join(dataDir, "repo"),
+    })
+      .toString("utf8")
+      .trim();
 
     expect(gitLog).toBe("agent/test-1.0\nsub=u1 client=c1");
   });
@@ -215,7 +220,7 @@ describe("KnowledgeService", () => {
         body: "body",
         actor: "human:alice",
         expectedRevision: "deadbeef00000000000000000000000000000000",
-      })
+      }),
     ).rejects.toThrowError(OkfError);
 
     try {
@@ -241,7 +246,7 @@ describe("KnowledgeService", () => {
         body: "body",
         actor: "human:alice",
         expectedRevision: null,
-      })
+      }),
     ).rejects.toThrowError(OkfError);
 
     try {
@@ -275,7 +280,7 @@ describe("KnowledgeService", () => {
         frontmatter: { type: "Note" },
         body: "b",
         actor: "human:alice",
-      })
+      }),
     ).resolves.toBeDefined();
 
     // human:bob -> forbidden_actor
@@ -286,7 +291,7 @@ describe("KnowledgeService", () => {
         frontmatter: { type: "Note" },
         body: "b",
         actor: "human:bob",
-      })
+      }),
     ).rejects.toThrowError(OkfError);
 
     // team:x -> invalid_actor
@@ -297,7 +302,7 @@ describe("KnowledgeService", () => {
         frontmatter: { type: "Note" },
         body: "b",
         actor: "team:x",
-      })
+      }),
     ).rejects.toThrowError(OkfError);
   });
 
@@ -548,7 +553,7 @@ description: External orders
 
 # Orders Content
 `,
-      "utf8"
+      "utf8",
     );
     execSync("git add alpha/tables/orders.md", { cwd: extDir });
     execSync('git commit -m "ext: add orders"', { cwd: extDir });
@@ -597,7 +602,7 @@ title: Remote X
 
 # Remote conflicting content
 `,
-      "utf8"
+      "utf8",
     );
     execSync("git add alpha/concept-x.md", { cwd: extDir });
     execSync('git commit -m "ext: conflicting concept-x"', { cwd: extDir });
@@ -614,9 +619,7 @@ title: Remote X
     expect(branch).toMatch(/^ok-fine\/conflict-\d{8}T\d{6}Z$/);
     const preserved = execSync(`git show ${branch}:alpha/concept-x.md`, { cwd: bareDir }).toString("utf8");
     expect(preserved).toContain("title: Local X");
-    expect(execSync(`git log -1 --format=%an ${branch}`, { cwd: bareDir }).toString("utf8").trim()).toBe(
-      "agent/1.0",
-    );
+    expect(execSync(`git log -1 --format=%an ${branch}`, { cwd: bareDir }).toString("utf8").trim()).toBe("agent/1.0");
 
     // Local HEAD is now equal to origin/main, and the catalog reflects the remote version
     const localHead = (await storage.git.run(["rev-parse", "HEAD"])).stdout.trim();
@@ -700,7 +703,7 @@ title: Remote X
 
     const badTraversalBuf = createTarWithEntry("../evil.md");
     await expect(
-      service.importArchive(alice, { project: "target", actor: "human:alice", archive: badTraversalBuf })
+      service.importArchive(alice, { project: "target", actor: "human:alice", archive: badTraversalBuf }),
     ).rejects.toMatchObject({ code: "invalid_archive" });
     // Let's create an in-memory tar or test archive_layout with multiple roots:
     const twoRootsDir = await createTempDir();
@@ -714,7 +717,7 @@ title: Remote X
     const twoRootsBuf = Buffer.concat(twoRootsTarChunks);
 
     await expect(
-      service.importArchive(alice, { project: "target", actor: "human:alice", archive: twoRootsBuf })
+      service.importArchive(alice, { project: "target", actor: "human:alice", archive: twoRootsBuf }),
     ).rejects.toMatchObject({ code: "archive_layout" });
 
     // Symlink entry rejection
@@ -729,7 +732,7 @@ title: Remote X
     const symBuf = Buffer.concat(symTarChunks);
 
     await expect(
-      service.importArchive(alice, { project: "target", actor: "human:alice", archive: symBuf })
+      service.importArchive(alice, { project: "target", actor: "human:alice", archive: symBuf }),
     ).rejects.toMatchObject({ code: "invalid_archive" });
 
     // Non-conformant bundle: concept without type

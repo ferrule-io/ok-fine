@@ -31,11 +31,7 @@ describe("BundleTree", () => {
   });
 
   it("plans a touched dir plus its ancestors only", () => {
-    expect(planIndexes(tree, ["a/b"], lookup).map((p) => p.path)).toEqual([
-      "a/b/index.md",
-      "a/index.md",
-      "index.md",
-    ]);
+    expect(planIndexes(tree, ["a/b"], lookup).map((p) => p.path)).toEqual(["a/b/index.md", "a/index.md", "index.md"]);
   });
 
   it("exists matches files and dirs inside the bundle only", () => {

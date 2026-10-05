@@ -15,11 +15,10 @@ const ALLOWED_ENTRY_TYPES = new Set(["File", "OldFile", "Directory"]);
 export async function extractBundleArchive(
   buffer: Buffer,
   destDir: string,
-  limits: { maxFileBytes: number; maxArchiveBytes: number }
+  limits: { maxFileBytes: number; maxArchiveBytes: number },
 ): Promise<void> {
   // Pass 1: Listing and validation
-  const { promise: listPromise, resolve: listResolve, reject: listReject } =
-    Promise.withResolvers<void>();
+  const { promise: listPromise, resolve: listResolve, reject: listReject } = Promise.withResolvers<void>();
 
   let validationError: Error | null = null;
   let entryCount = 0;
@@ -38,39 +37,23 @@ export async function extractBundleArchive(
       }
 
       if (!ALLOWED_ENTRY_TYPES.has(type)) {
-        validationError = new OkfError(
-          "invalid_archive",
-          400,
-          `archive contains unsupported entry type: ${type}`
-        );
+        validationError = new OkfError("invalid_archive", 400, `archive contains unsupported entry type: ${type}`);
         return;
       }
 
       if (entry.path.startsWith("/")) {
-        validationError = new OkfError(
-          "invalid_archive",
-          400,
-          "archive cannot contain absolute paths"
-        );
+        validationError = new OkfError("invalid_archive", 400, "archive cannot contain absolute paths");
         return;
       }
 
       const segments = entry.path.split("/").filter((s) => s.length > 0);
       if (segments.length === 0) {
-        validationError = new OkfError(
-          "invalid_archive",
-          400,
-          "archive contains empty entry path"
-        );
+        validationError = new OkfError("invalid_archive", 400, "archive contains empty entry path");
         return;
       }
 
       if (segments.includes("..")) {
-        validationError = new OkfError(
-          "invalid_archive",
-          400,
-          "archive cannot contain path traversal (..) segments"
-        );
+        validationError = new OkfError("invalid_archive", 400, "archive cannot contain path traversal (..) segments");
         return;
       }
 
@@ -79,7 +62,7 @@ export async function extractBundleArchive(
           validationError = new OkfError(
             "archive_layout",
             400,
-            "archive must contain a single top-level directory, as produced by export"
+            "archive must contain a single top-level directory, as produced by export",
           );
           return;
         }
@@ -92,7 +75,7 @@ export async function extractBundleArchive(
           validationError = new OkfError(
             "archive_layout",
             400,
-            "archive must contain a single top-level directory, as produced by export"
+            "archive must contain a single top-level directory, as produced by export",
           );
           return;
         }
@@ -102,7 +85,7 @@ export async function extractBundleArchive(
         validationError = new OkfError(
           "payload_too_large",
           413,
-          `archive entry "${entry.path}" exceeds maximum file size (${limits.maxFileBytes} bytes)`
+          `archive entry "${entry.path}" exceeds maximum file size (${limits.maxFileBytes} bytes)`,
         );
         return;
       }
@@ -112,18 +95,14 @@ export async function extractBundleArchive(
         validationError = new OkfError(
           "payload_too_large",
           413,
-          `uncompressed archive exceeds 5x max archive bytes limit (${5 * limits.maxArchiveBytes} bytes)`
+          `uncompressed archive exceeds 5x max archive bytes limit (${5 * limits.maxArchiveBytes} bytes)`,
         );
         return;
       }
 
       entryCount++;
       if (entryCount > 20000) {
-        validationError = new OkfError(
-          "payload_too_large",
-          413,
-          "archive contains more than 20,000 entries"
-        );
+        validationError = new OkfError("payload_too_large", 413, "archive contains more than 20,000 entries");
         return;
       }
     },
@@ -136,11 +115,7 @@ export async function extractBundleArchive(
     }
     if (topDirs.size !== 1) {
       listReject(
-        new OkfError(
-          "archive_layout",
-          400,
-          "archive must contain a single top-level directory, as produced by export"
-        )
+        new OkfError("archive_layout", 400, "archive must contain a single top-level directory, as produced by export"),
       );
       return;
     }
@@ -155,8 +130,7 @@ export async function extractBundleArchive(
   await listPromise;
 
   // Pass 2: Extract with strip: 1 and skip dotfiles
-  const { promise: extractPromise, resolve: extractResolve, reject: extractReject } =
-    Promise.withResolvers<void>();
+  const { promise: extractPromise, resolve: extractResolve, reject: extractReject } = Promise.withResolvers<void>();
 
   const extractStream = tar.x({
     cwd: destDir,

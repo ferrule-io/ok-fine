@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { Document, parseDocument, isMap } from "yaml";
+import { Document, isMap, parseDocument } from "yaml";
 
 export function splitFrontmatter(text: string): { yaml: string; body: string } | null {
   if (text.charCodeAt(0) === 0xfeff) {
@@ -24,7 +24,9 @@ export function splitFrontmatter(text: string): { yaml: string; body: string } |
   return { yaml, body };
 }
 
-export function parseFrontmatter(yaml: string):
+export function parseFrontmatter(
+  yaml: string,
+):
   | { doc: Document; data: Record<string, unknown> }
   | { error: "invalid_yaml" | "frontmatter_not_mapping"; message: string } {
   const doc = parseDocument(yaml);
@@ -45,10 +47,7 @@ export function parseFrontmatter(yaml: string):
 }
 
 export function serializeConcept(doc: Document, body: string): string {
-  const normalizedBody = body
-    .replace(/\r\n/g, "\n")
-    .replace(/^\n+/, "")
-    .replace(/\s*$/, "");
+  const normalizedBody = body.replace(/\r\n/g, "\n").replace(/^\n+/, "").replace(/\s*$/, "");
   return `---\n${doc.toString({ lineWidth: 0 })}---\n\n${normalizedBody}\n`;
 }
 
@@ -62,10 +61,8 @@ function createFormattedNode(doc: Document, key: string, val: unknown): unknown 
   if (key === "parameters" && Array.isArray(val)) {
     return doc.createNode(
       val.map((item) =>
-        item && typeof item === "object" && !Array.isArray(item)
-          ? doc.createNode(item, { flow: true })
-          : item
-      )
+        item && typeof item === "object" && !Array.isArray(item) ? doc.createNode(item, { flow: true }) : item,
+      ),
     );
   }
   if (key === "generated" && val && typeof val === "object") {
@@ -77,7 +74,7 @@ function createFormattedNode(doc: Document, key: string, val: unknown): unknown 
 export function applyFrontmatter(
   existing: Document | null,
   input: Record<string, unknown>,
-  server: { generated: { by: string; at: string } }
+  server: { generated: { by: string; at: string } },
 ): { doc: Document; ignoredKeys: string[] } {
   const ignoredKeys: string[] = [];
 
@@ -180,7 +177,7 @@ export function appendVerification(doc: Document, entry: { by: string; at: strin
   if (raw && typeof raw === "object") {
     if (Array.isArray(raw)) {
       list = raw.filter((item): item is { by: string; at?: string } =>
-        Boolean(item && typeof item === "object" && typeof item.by === "string" && item.by.length > 0)
+        Boolean(item && typeof item === "object" && typeof item.by === "string" && item.by.length > 0),
       );
     } else {
       if ("by" in raw && typeof raw.by === "string" && raw.by.length > 0) {

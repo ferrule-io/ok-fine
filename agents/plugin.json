@@ -9,10 +9,5 @@
   "homepage": "https://github.com/ferrule-io/ok-fine#using-ok-fine-from-coding-agents",
   "repository": "https://github.com/ferrule-io/ok-fine",
   "license": "Apache-2.0",
-  "keywords": [
-    "okf",
-    "knowledge",
-    "mcp",
-    "memory"
-  ]
+  "keywords": ["okf", "knowledge", "mcp", "memory"]
 }

@@ -65,7 +65,12 @@ export function isStale(fm: Record<string, unknown> | null | undefined, now: Dat
 }
 
 export function generatedAt(fm: Record<string, unknown> | null | undefined): string | null {
-  if (fm?.generated && typeof fm.generated === "object" && "at" in fm.generated && typeof fm.generated.at === "string") {
+  if (
+    fm?.generated &&
+    typeof fm.generated === "object" &&
+    "at" in fm.generated &&
+    typeof fm.generated.at === "string"
+  ) {
     return fm.generated.at;
   }
   const legacy = fm?.timestamp;
@@ -79,7 +84,12 @@ export function generatedAt(fm: Record<string, unknown> | null | undefined): str
 }
 
 export function generatedBy(fm: Record<string, unknown> | null | undefined): string | null {
-  if (fm?.generated && typeof fm.generated === "object" && "by" in fm.generated && typeof fm.generated.by === "string") {
+  if (
+    fm?.generated &&
+    typeof fm.generated === "object" &&
+    "by" in fm.generated &&
+    typeof fm.generated.by === "string"
+  ) {
     return fm.generated.by;
   }
   return null;

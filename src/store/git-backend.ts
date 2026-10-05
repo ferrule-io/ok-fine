@@ -16,13 +16,16 @@ import type {
   TransactionResult,
 } from "./backend.js";
 import type { BundleTree } from "./bundle.js";
+import { atomicWrite, isDirectory, listTreeFiles, pathExists } from "./fs-util.js";
 import { Git, isPushRejection, redactRemote } from "./git.js";
 import { Mutex } from "./mutex.js";
-import { atomicWrite, isDirectory, listTreeFiles, pathExists } from "./fs-util.js";
 import { PathIndex } from "./path-index.js";
 
 function extractChangedProjects(diffOutput: string): string[] {
-  const lines = diffOutput.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  const lines = diffOutput
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
   const projects = new Set<string>();
   for (const line of lines) {
     const firstSegment = line.split("/")[0];
@@ -39,7 +42,7 @@ class GitTx implements StorageTx {
 
   constructor(
     private readonly repoDir: string,
-    private readonly index: PathIndex
+    private readonly index: PathIndex,
   ) {}
 
   async writeFile(project: string, path: string, content: string | Buffer): Promise<void> {
@@ -180,7 +183,7 @@ export class GitBackend implements StorageBackend {
           `okf(${project}): regenerate indexes`,
           "process:ok-fine",
           { subject: "system", clientId: "ok-fine" },
-          [project]
+          [project],
         );
       }
     }
@@ -219,19 +222,16 @@ export class GitBackend implements StorageBackend {
         const isRefNotFound = fetchRes.stderr.includes("couldn't find remote ref");
         if (!isRefNotFound) {
           if (!headHasCommits) {
-            throw new Error(
-              `Failed to fetch from remote on empty local repository:\n${fetchRes.stderr}`
-            );
+            throw new Error(`Failed to fetch from remote on empty local repository:\n${fetchRes.stderr}`);
           } else {
             log.warn({ stderr: fetchRes.stderr }, "Fetch failed on startup; continuing with local commits");
           }
         }
       }
 
-      const remoteBranchRev = await repo.git.run(
-        ["rev-parse", "--verify", `origin/${config.gitBranch}`],
-        { allowFail: true }
-      );
+      const remoteBranchRev = await repo.git.run(["rev-parse", "--verify", `origin/${config.gitBranch}`], {
+        allowFail: true,
+      });
       const remoteBranchExists = remoteBranchRev.code === 0;
 
       if (!headHasCommits) {
@@ -303,10 +303,7 @@ export class GitBackend implements StorageBackend {
       // not exists
     }
 
-    const requiredAttrLines = [
-      "**/index.md merge=union",
-      "**/log.md merge=union",
-    ];
+    const requiredAttrLines = ["**/index.md merge=union", "**/log.md merge=union"];
 
     let newAttrContent = attrContent;
     for (const line of requiredAttrLines) {
@@ -354,7 +351,7 @@ export class GitBackend implements StorageBackend {
     subject: string,
     author: string,
     principal: { subject: string; clientId: string },
-    projects: string[]
+    projects: string[],
   ): Promise<string | null> {
     const addArgs = projects.length > 0 ? ["add", "-A", "--", ...projects] : ["add", "-A"];
     await this.git.run(addArgs);
@@ -395,7 +392,7 @@ export class GitBackend implements StorageBackend {
     await this.git.run(["branch", "-f", conflictBranch, "HEAD"]);
     const pushRes = await this.git.run(
       ["push", "origin", `refs/heads/${conflictBranch}:refs/heads/${conflictBranch}`],
-      { allowFail: true }
+      { allowFail: true },
     );
     await this.git.run(["reset", "--hard", `origin/${this.config.gitBranch}`]);
 
@@ -410,34 +407,27 @@ export class GitBackend implements StorageBackend {
 
   async transaction<T>(
     spec: { projects: string[] },
-    work: (tx: StorageTx) => Promise<{ value: T; commit: CommitSpec | null }>
+    work: (tx: StorageTx) => Promise<{ value: T; commit: CommitSpec | null }>,
   ): Promise<TransactionResult<T>> {
     return this.mutex.run(async () => {
       const warnings: string[] = [];
 
       // Step 1: Remote sync check before work
       if (this.hasRemote) {
-        const fetchRes = await this.git.run(
-          ["fetch", "origin", this.config.gitBranch],
-          { allowFail: true }
-        );
+        const fetchRes = await this.git.run(["fetch", "origin", this.config.gitBranch], { allowFail: true });
 
         if (fetchRes.code !== 0) {
           const firstLine = fetchRes.stderr.split(/\r?\n/)[0] ?? "unknown error";
           warnings.push(`remote unreachable: ${firstLine}`);
         } else {
-          const behindRes = await this.git.run(
-            ["rev-list", "--count", `HEAD..origin/${this.config.gitBranch}`],
-            { allowFail: true }
-          );
+          const behindRes = await this.git.run(["rev-list", "--count", `HEAD..origin/${this.config.gitBranch}`], {
+            allowFail: true,
+          });
           const behind = Number.parseInt(behindRes.stdout.trim(), 10) || 0;
 
           if (behind > 0) {
             const before = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
-            const rebaseRes = await this.git.run(
-              ["rebase", `origin/${this.config.gitBranch}`],
-              { allowFail: true }
-            );
+            const rebaseRes = await this.git.run(["rebase", `origin/${this.config.gitBranch}`], { allowFail: true });
 
             if (rebaseRes.code !== 0) {
               warnings.push(await this.preserveConflict());
@@ -457,28 +447,17 @@ export class GitBackend implements StorageBackend {
 
         let commitSha: string | null = null;
         if (workRes.commit) {
-          const addArgs =
-            spec.projects.length > 0
-              ? ["add", "-A", "--", ...spec.projects]
-              : ["add", "-A"];
+          const addArgs = spec.projects.length > 0 ? ["add", "-A", "--", ...spec.projects] : ["add", "-A"];
           await this.git.run(addArgs);
 
           const diffCheck = await this.git.run(["diff", "--cached", "--quiet"], { allowFail: true });
           if (diffCheck.code !== 0) {
             const c = workRes.commit;
-            const commitArgs = [
-              "commit",
-              `--author=${c.author} <ok-fine@localhost>`,
-              "-m",
-              c.subject,
-            ];
+            const commitArgs = ["commit", `--author=${c.author} <ok-fine@localhost>`, "-m", c.subject];
             if (c.body && c.body.trim().length > 0) {
               commitArgs.push("-m", c.body);
             }
-            commitArgs.push(
-              "-m",
-              `Okf-Principal: sub=${c.principal.subject} client=${c.principal.clientId}`
-            );
+            commitArgs.push("-m", `Okf-Principal: sub=${c.principal.subject} client=${c.principal.clientId}`);
             await this.git.run(commitArgs);
             commitSha = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
           }
@@ -489,10 +468,9 @@ export class GitBackend implements StorageBackend {
         if (commitSha !== null && this.hasRemote) {
           let pushSuccess = false;
           for (let attempt = 0; attempt < 3; attempt++) {
-            const pushRes = await this.git.run(
-              ["push", "origin", `HEAD:refs/heads/${this.config.gitBranch}`],
-              { allowFail: true }
-            );
+            const pushRes = await this.git.run(["push", "origin", `HEAD:refs/heads/${this.config.gitBranch}`], {
+              allowFail: true,
+            });
 
             if (pushRes.code === 0) {
               pushSuccess = true;
@@ -503,10 +481,7 @@ export class GitBackend implements StorageBackend {
             if (isPushRejection(pushRes.stderr)) {
               const pre = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
               await this.git.run(["fetch", "origin", this.config.gitBranch], { allowFail: true });
-              const rebaseRes = await this.git.run(
-                ["rebase", `origin/${this.config.gitBranch}`],
-                { allowFail: true }
-              );
+              const rebaseRes = await this.git.run(["rebase", `origin/${this.config.gitBranch}`], { allowFail: true });
 
               if (rebaseRes.code === 0) {
                 const post = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
@@ -519,7 +494,7 @@ export class GitBackend implements StorageBackend {
                 throw new OkfError(
                   "upstream_conflict",
                   409,
-                  "change conflicts with a concurrent upstream edit; re-read and retry"
+                  "change conflicts with a concurrent upstream edit; re-read and retry",
                 );
               }
             } else {
@@ -543,8 +518,7 @@ export class GitBackend implements StorageBackend {
         };
       } catch (err) {
         await this.git.run(["reset", "--hard", "HEAD"], { allowFail: true });
-        const cleanArgs =
-          spec.projects.length > 0 ? ["clean", "-fd", "--", ...spec.projects] : ["clean", "-fd"];
+        const cleanArgs = spec.projects.length > 0 ? ["clean", "-fd", "--", ...spec.projects] : ["clean", "-fd"];
         await this.git.run(cleanArgs, { allowFail: true });
         await this.resync(spec.projects);
         throw err;
@@ -559,28 +533,21 @@ export class GitBackend implements StorageBackend {
       }
 
       const before = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
-      const fetchRes = await this.git.run(
-        ["fetch", "origin", this.config.gitBranch],
-        { allowFail: true }
-      );
+      const fetchRes = await this.git.run(["fetch", "origin", this.config.gitBranch], { allowFail: true });
 
       if (fetchRes.code !== 0) {
         this.lastError = fetchRes.stderr.split(/\r?\n/)[0] ?? "fetch failed";
         return this.syncStatus();
       }
 
-      const behindRes = await this.git.run(
-        ["rev-list", "--count", `HEAD..origin/${this.config.gitBranch}`],
-        { allowFail: true }
-      );
+      const behindRes = await this.git.run(["rev-list", "--count", `HEAD..origin/${this.config.gitBranch}`], {
+        allowFail: true,
+      });
       const behind = Number.parseInt(behindRes.stdout.trim(), 10) || 0;
 
       let runError: string | null = null;
       if (behind > 0) {
-        const rebaseRes = await this.git.run(
-          ["rebase", `origin/${this.config.gitBranch}`],
-          { allowFail: true }
-        );
+        const rebaseRes = await this.git.run(["rebase", `origin/${this.config.gitBranch}`], { allowFail: true });
 
         if (rebaseRes.code !== 0) {
           runError = `rebase conflict; ${await this.preserveConflict()}`;
@@ -592,17 +559,15 @@ export class GitBackend implements StorageBackend {
         }
       }
 
-      const aheadRes = await this.git.run(
-        ["rev-list", "--count", `origin/${this.config.gitBranch}..HEAD`],
-        { allowFail: true }
-      );
+      const aheadRes = await this.git.run(["rev-list", "--count", `origin/${this.config.gitBranch}..HEAD`], {
+        allowFail: true,
+      });
       const ahead = Number.parseInt(aheadRes.stdout.trim(), 10) || 0;
 
       if (ahead > 0) {
-        const pushRes = await this.git.run(
-          ["push", "origin", `HEAD:refs/heads/${this.config.gitBranch}`],
-          { allowFail: true }
-        );
+        const pushRes = await this.git.run(["push", "origin", `HEAD:refs/heads/${this.config.gitBranch}`], {
+          allowFail: true,
+        });
         if (pushRes.code !== 0) {
           const pushError = `push failed: ${pushRes.stderr.split(/\r?\n/)[0] ?? "unknown error"}`;
           runError = runError ? `${runError}; ${pushError}` : pushError;
@@ -623,17 +588,15 @@ export class GitBackend implements StorageBackend {
     let behind = 0;
 
     if (this.hasRemote) {
-      const aheadRes = await this.git.run(
-        ["rev-list", "--count", `origin/${this.config.gitBranch}..HEAD`],
-        { allowFail: true }
-      );
+      const aheadRes = await this.git.run(["rev-list", "--count", `origin/${this.config.gitBranch}..HEAD`], {
+        allowFail: true,
+      });
       if (aheadRes.code === 0) {
         ahead = Number.parseInt(aheadRes.stdout.trim(), 10) || 0;
       }
-      const behindRes = await this.git.run(
-        ["rev-list", "--count", `HEAD..origin/${this.config.gitBranch}`],
-        { allowFail: true }
-      );
+      const behindRes = await this.git.run(["rev-list", "--count", `HEAD..origin/${this.config.gitBranch}`], {
+        allowFail: true,
+      });
       if (behindRes.code === 0) {
         behind = Number.parseInt(behindRes.stdout.trim(), 10) || 0;
       }

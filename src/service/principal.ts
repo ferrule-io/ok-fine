@@ -14,27 +14,15 @@ export interface Principal {
 export function checkActor(actor: string, p: Principal): string {
   const parsed = parseActor(actor);
   if (!parsed) {
-    throw new OkfError(
-      "invalid_actor",
-      400,
-      "actor must be <producer>/<version>, human:<id>, or process:<id>"
-    );
+    throw new OkfError("invalid_actor", 400, "actor must be <producer>/<version>, human:<id>, or process:<id>");
   }
 
   if (parsed.kind === "human") {
     if (p.identity === null) {
-      throw new OkfError(
-        "forbidden_actor",
-        403,
-        "this token carries no identity claim; human: actors are not allowed"
-      );
+      throw new OkfError("forbidden_actor", 403, "this token carries no identity claim; human: actors are not allowed");
     }
     if (parsed.id !== p.identity) {
-      throw new OkfError(
-        "forbidden_actor",
-        403,
-        `this token may only act as human:${p.identity}`
-      );
+      throw new OkfError("forbidden_actor", 403, `this token may only act as human:${p.identity}`);
     }
   }
 

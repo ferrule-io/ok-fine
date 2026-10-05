@@ -1,9 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { startDevIssuer, type DevIssuer } from "../dev/issuer.js";
-import { JwtTokenVerifier, principalFromAuthInfo } from "./verifier.js";
-import { createAuthenticator } from "./http-auth.js";
-import { discoverAuthorizationServer } from "./discovery.js";
 import { OAuthError, OAuthErrorCode } from "@modelcontextprotocol/server";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { type DevIssuer, startDevIssuer } from "../dev/issuer.js";
+import { discoverAuthorizationServer } from "./discovery.js";
+import { createAuthenticator } from "./http-auth.js";
+import { JwtTokenVerifier, principalFromAuthInfo } from "./verifier.js";
 
 describe("OAuth authentication and verification", () => {
   let devIssuer: DevIssuer;
@@ -259,40 +259,28 @@ describe("OAuth authentication and verification", () => {
     };
 
     it("admin grants canAdmin, canWrite, canRead", () => {
-      const p = principalFromAuthInfo(
-        { ...baseInfo, scopes: ["okf:admin"] },
-        scopeNames
-      );
+      const p = principalFromAuthInfo({ ...baseInfo, scopes: ["okf:admin"] }, scopeNames);
       expect(p.canAdmin).toBe(true);
       expect(p.canWrite).toBe(true);
       expect(p.canRead).toBe(true);
     });
 
     it("write grants canWrite and canRead, but not canAdmin", () => {
-      const p = principalFromAuthInfo(
-        { ...baseInfo, scopes: ["okf:write"] },
-        scopeNames
-      );
+      const p = principalFromAuthInfo({ ...baseInfo, scopes: ["okf:write"] }, scopeNames);
       expect(p.canAdmin).toBe(false);
       expect(p.canWrite).toBe(true);
       expect(p.canRead).toBe(true);
     });
 
     it("read grants canRead only", () => {
-      const p = principalFromAuthInfo(
-        { ...baseInfo, scopes: ["okf:read"] },
-        scopeNames
-      );
+      const p = principalFromAuthInfo({ ...baseInfo, scopes: ["okf:read"] }, scopeNames);
       expect(p.canAdmin).toBe(false);
       expect(p.canWrite).toBe(false);
       expect(p.canRead).toBe(true);
     });
 
     it("no recognized scopes grants none", () => {
-      const p = principalFromAuthInfo(
-        { ...baseInfo, scopes: ["custom:scope"] },
-        scopeNames
-      );
+      const p = principalFromAuthInfo({ ...baseInfo, scopes: ["custom:scope"] }, scopeNames);
       expect(p.canAdmin).toBe(false);
       expect(p.canWrite).toBe(false);
       expect(p.canRead).toBe(false);

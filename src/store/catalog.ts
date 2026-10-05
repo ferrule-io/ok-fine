@@ -1,6 +1,6 @@
 import MiniSearch from "minisearch";
 import { type ConceptRecord, parseConcept } from "../okf/concept.js";
-import { type Status, type TrustTier, isStale } from "../okf/semantics.js";
+import { isStale, type Status, type TrustTier } from "../okf/semantics.js";
 import type { BundleSource } from "./backend.js";
 import { isConceptPath } from "./bundle.js";
 

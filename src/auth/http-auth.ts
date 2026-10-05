@@ -1,13 +1,13 @@
 import {
+  type AuthInfo,
+  bearerAuthChallengeResponse,
   OAuthError,
   OAuthErrorCode,
-  bearerAuthChallengeResponse,
-  verifyBearerToken,
-  type AuthInfo,
   type OAuthTokenVerifier,
+  verifyBearerToken,
 } from "@modelcontextprotocol/server";
-import { principalFromAuthInfo, type ScopeNames } from "./verifier.js";
 import type { Principal } from "../service/principal.js";
+import { principalFromAuthInfo, type ScopeNames } from "./verifier.js";
 
 export interface AuthenticatorOptions {
   verifier: OAuthTokenVerifier;
@@ -33,11 +33,7 @@ export interface Authenticator {
   insufficientScope(scopeName: string): Response;
 }
 
-function makeChallengeResponse(
-  error: unknown,
-  requiredScopes: string[],
-  resourceMetadataUrl: string
-): Response {
+function makeChallengeResponse(error: unknown, requiredScopes: string[], resourceMetadataUrl: string): Response {
   const response = bearerAuthChallengeResponse(error, {
     requiredScopes,
     resourceMetadataUrl,
@@ -65,9 +61,7 @@ function makeChallengeResponse(
 export function createAuthenticator(options: AuthenticatorOptions): Authenticator {
   const { verifier, resourceMetadataUrl, scopeNames } = options;
 
-  async function authenticate(
-    authorizationHeader: string | null | undefined
-  ): Promise<AuthenticateResult> {
+  async function authenticate(authorizationHeader: string | null | undefined): Promise<AuthenticateResult> {
     try {
       const authInfo = await verifyBearerToken(authorizationHeader, {
         verifier,
@@ -80,18 +74,14 @@ export function createAuthenticator(options: AuthenticatorOptions): Authenticato
         const response = makeChallengeResponse(
           new OAuthError(OAuthErrorCode.InsufficientScope, "token carries no ok-fine scope"),
           [scopeNames.read],
-          resourceMetadataUrl
+          resourceMetadataUrl,
         );
         return { ok: false, response };
       }
 
       return { ok: true, authInfo, principal };
     } catch (err: unknown) {
-      const response = makeChallengeResponse(
-        err,
-        [scopeNames.read, scopeNames.write],
-        resourceMetadataUrl
-      );
+      const response = makeChallengeResponse(err, [scopeNames.read, scopeNames.write], resourceMetadataUrl);
       return { ok: false, response };
     }
   }
@@ -100,7 +90,7 @@ export function createAuthenticator(options: AuthenticatorOptions): Authenticato
     return makeChallengeResponse(
       new OAuthError(OAuthErrorCode.InsufficientScope, `requires ${scopeName}`),
       [scopeName],
-      resourceMetadataUrl
+      resourceMetadataUrl,
     );
   }
 

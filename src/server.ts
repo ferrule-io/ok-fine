@@ -1,25 +1,25 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import Fastify, { type FastifyInstance } from "fastify";
 import {
+  type AuthInfo,
   buildOAuthProtectedResourceMetadata,
   createMcpHandler,
   getOAuthProtectedResourceMetadataUrl,
-  type AuthInfo,
   type OAuthMetadata,
 } from "@modelcontextprotocol/server";
+import Fastify, { type FastifyInstance } from "fastify";
 import { ZodError } from "zod";
-import type { Config } from "./config.js";
-import { OkfError } from "./errors.js";
-import { discoverAuthorizationServer, type DiscoveredAuthorizationServer } from "./auth/discovery.js";
+import { type DiscoveredAuthorizationServer, discoverAuthorizationServer } from "./auth/discovery.js";
 import { createAuthenticator } from "./auth/http-auth.js";
 import { JwtTokenVerifier, principalFromAuthInfo } from "./auth/verifier.js";
+import type { Config } from "./config.js";
+import { OkfError } from "./errors.js";
 import { registerMcpRoute } from "./http/mcp-route.js";
 import { registerRestRoutes } from "./http/rest.js";
 import { createMcpServer } from "./mcp/server.js";
-import { Catalog } from "./store/catalog.js";
-import { GitBackend } from "./store/git-backend.js";
 import { KnowledgeService } from "./service/knowledge-service.js";
 import type { Principal } from "./service/principal.js";
+import { Catalog } from "./store/catalog.js";
+import { GitBackend } from "./store/git-backend.js";
 
 type Permission = "read" | "write" | "admin";
 
@@ -111,10 +111,14 @@ export async function startServer(config: Config): Promise<RunningServer> {
 
   app.setErrorHandler((error, req, reply) => {
     if (error instanceof OkfError) {
-      return reply.code(error.status).send({ error: { code: error.code, message: error.message, details: error.details } });
+      return reply
+        .code(error.status)
+        .send({ error: { code: error.code, message: error.message, details: error.details } });
     }
     if (error instanceof ZodError) {
-      return reply.code(400).send({ error: { code: "bad_request", message: "invalid request", details: error.issues } });
+      return reply
+        .code(400)
+        .send({ error: { code: "bad_request", message: "invalid request", details: error.issues } });
     }
     const fastifyError = error as { code?: string; statusCode?: number; message?: string };
     if (fastifyError.code === "FST_ERR_CTP_BODY_TOO_LARGE") {
@@ -125,7 +129,9 @@ export async function startServer(config: Config): Promise<RunningServer> {
     }
     const status = fastifyError.statusCode;
     if (typeof status === "number" && status >= 400 && status < 500) {
-      return reply.code(status).send({ error: { code: "bad_request", message: fastifyError.message ?? "bad request" } });
+      return reply
+        .code(status)
+        .send({ error: { code: "bad_request", message: fastifyError.message ?? "bad request" } });
     }
     req.log.error({ err: error }, "unhandled error");
     return reply.code(500).send({ error: { code: "internal", message: "internal error" } });

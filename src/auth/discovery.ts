@@ -25,7 +25,7 @@ const DiscoveryMetadata = z
  */
 export async function discoverAuthorizationServer(
   issuer: string,
-  options?: DiscoveryOptions
+  options?: DiscoveryOptions,
 ): Promise<DiscoveredAuthorizationServer> {
   const timeoutMs = options?.timeoutMs ?? 5000;
   const base = issuer.replace(/\/+$/, "");

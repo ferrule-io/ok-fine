@@ -5,39 +5,17 @@ import type { Readable } from "node:stream";
 import type { Document } from "yaml";
 import type { Config, Logger } from "../config.js";
 import { OkfError } from "../errors.js";
+import { type ConceptRecord, parseConcept } from "../okf/concept.js";
 import {
-  applyFrontmatter,
   appendVerification,
+  applyFrontmatter,
   nowIso,
   parseFrontmatter,
   serializeConcept,
   splitFrontmatter,
 } from "../okf/frontmatter.js";
-import { type ConceptRecord, parseConcept } from "../okf/concept.js";
-import {
-  blobRevision,
-  normalizeConceptIdForWrite,
-  normalizeFilePathForWrite,
-  resolveReadPath,
-  PROJECT_RE,
-} from "../okf/paths.js";
-import { type BundleTree, buildDirListing, lintBundle, planIndexes } from "../store/bundle.js";
-import { extractBundleArchive } from "../store/archive.js";
-import { fsBundleSource } from "../store/fs-util.js";
-import type { Catalog, SearchParams, SearchHit } from "../store/catalog.js";
-import {
-  bundleSource,
-  type HistoryEntry,
-  type StorageBackend,
-  type StorageTx,
-  type SyncStatus,
-} from "../store/backend.js";
-import { type Principal, checkActor } from "./principal.js";
-import {
-  isStale,
-  type Status,
-  type TrustTier,
-} from "../okf/semantics.js";
+import { renderIndex } from "../okf/index-file.js";
+import { type LintIssue, lintConceptFile } from "../okf/lint.js";
 import {
   logCreationEntry,
   logDeletionEntry,
@@ -49,9 +27,27 @@ import {
   logVerificationEntry,
   prependLogEntry,
 } from "../okf/log-file.js";
-import { type LintIssue, lintConceptFile } from "../okf/lint.js";
+import {
+  blobRevision,
+  normalizeConceptIdForWrite,
+  normalizeFilePathForWrite,
+  PROJECT_RE,
+  resolveReadPath,
+} from "../okf/paths.js";
 import { normalizeRepository } from "../okf/repository.js";
-import { renderIndex } from "../okf/index-file.js";
+import { isStale, type Status, type TrustTier } from "../okf/semantics.js";
+import { extractBundleArchive } from "../store/archive.js";
+import {
+  bundleSource,
+  type HistoryEntry,
+  type StorageBackend,
+  type StorageTx,
+  type SyncStatus,
+} from "../store/backend.js";
+import { type BundleTree, buildDirListing, lintBundle, planIndexes } from "../store/bundle.js";
+import type { Catalog, SearchHit, SearchParams } from "../store/catalog.js";
+import { fsBundleSource } from "../store/fs-util.js";
+import { checkActor, type Principal } from "./principal.js";
 
 export interface ProjectSummary {
   project: string;
@@ -341,7 +337,7 @@ export class KnowledgeService {
 
   async getIndex(
     project: string,
-    dir = ""
+    dir = "",
   ): Promise<{ project: string; path: string; markdown: string; entries: IndexEntry[] }> {
     const tree = await this.assertProjectExists(project);
 
@@ -499,11 +495,7 @@ export class KnowledgeService {
     return { results: this.catalog.search(params) };
   }
 
-  async history(
-    project: string,
-    id?: string,
-    limit = 20
-  ): Promise<{ commits: HistoryEntry[] }> {
+  async history(project: string, id?: string, limit = 20): Promise<{ commits: HistoryEntry[] }> {
     await this.assertProjectExists(project);
 
     let path: string | null = null;
@@ -524,7 +516,7 @@ export class KnowledgeService {
 
   async readFile(
     project: string,
-    path: string
+    path: string,
   ): Promise<{ project: string; path: string; revision: string; content: string }> {
     await this.assertProjectExists(project);
     const cleanPath = resolveReadPath(path);
@@ -538,11 +530,7 @@ export class KnowledgeService {
     }
 
     if (buf.includes(0)) {
-      throw new OkfError(
-        "unsupported_media",
-        415,
-        "binary files containing NUL bytes are not supported"
-      );
+      throw new OkfError("unsupported_media", 415, "binary files containing NUL bytes are not supported");
     }
 
     return {
@@ -565,7 +553,7 @@ export class KnowledgeService {
 
   async createProject(
     p: Principal,
-    args: { project: string; title: string; description?: string; actor: string }
+    args: { project: string; title: string; description?: string; actor: string },
   ): Promise<{ project: string; commit: string | null; pushed: boolean | null; warnings: string[] }> {
     checkActor(args.actor, p);
 
@@ -635,25 +623,17 @@ export class KnowledgeService {
       actor: string;
       expectedRevision?: string | null;
       message?: string;
-    }
+    },
   ): Promise<WriteConceptResult> {
     checkActor(args.actor, p);
     await this.assertProjectExists(args.project, true);
     const cleanId = normalizeConceptIdForWrite(args.id);
 
-    if (
-      !args.frontmatter ||
-      typeof args.frontmatter !== "object" ||
-      Array.isArray(args.frontmatter)
-    ) {
+    if (!args.frontmatter || typeof args.frontmatter !== "object" || Array.isArray(args.frontmatter)) {
       throw new OkfError("invalid_frontmatter", 400, "frontmatter must be a plain object");
     }
     if (typeof args.frontmatter.type !== "string" || args.frontmatter.type.trim().length === 0) {
-      throw new OkfError(
-        "invalid_frontmatter",
-        400,
-        "frontmatter must contain a non-blank string type"
-      );
+      throw new OkfError("invalid_frontmatter", 400, "frontmatter must contain a non-blank string type");
     }
 
     let resultPayload!: {
@@ -746,9 +726,7 @@ export class KnowledgeService {
         issues,
       };
 
-      const subject = isCreated
-        ? `okf(${args.project}): create ${cleanId}`
-        : `okf(${args.project}): update ${cleanId}`;
+      const subject = isCreated ? `okf(${args.project}): create ${cleanId}` : `okf(${args.project}): update ${cleanId}`;
 
       return {
         value: resultPayload,
@@ -776,7 +754,7 @@ export class KnowledgeService {
 
   async verifyConcept(
     p: Principal,
-    args: { project: string; id: string; actor: string; expectedRevision?: string }
+    args: { project: string; id: string; actor: string; expectedRevision?: string },
   ): Promise<VerifyConceptResult> {
     checkActor(args.actor, p);
     await this.assertProjectExists(args.project, true);
@@ -797,11 +775,7 @@ export class KnowledgeService {
     const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
       const buf = await this.storage.readFile(args.project, filePath);
       if (buf === null) {
-        throw new OkfError(
-          "not_found",
-          404,
-          `concept "${cleanId}" not found in project "${args.project}"`
-        );
+        throw new OkfError("not_found", 404, `concept "${cleanId}" not found in project "${args.project}"`);
       }
 
       const currentRev = blobRevision(buf);
@@ -815,20 +789,12 @@ export class KnowledgeService {
       const text = buf.toString("utf8");
       const split = splitFrontmatter(text);
       if (!split) {
-        throw new OkfError(
-          "invalid_frontmatter",
-          400,
-          "cannot verify an unparseable concept: missing frontmatter"
-        );
+        throw new OkfError("invalid_frontmatter", 400, "cannot verify an unparseable concept: missing frontmatter");
       }
 
       const parsed = parseFrontmatter(split.yaml);
       if ("error" in parsed) {
-        throw new OkfError(
-          "invalid_frontmatter",
-          400,
-          `cannot verify an unparseable concept: ${parsed.message}`
-        );
+        throw new OkfError("invalid_frontmatter", 400, `cannot verify an unparseable concept: ${parsed.message}`);
       }
 
       appendVerification(parsed.doc, { by: args.actor, at: nowIso() });
@@ -867,7 +833,7 @@ export class KnowledgeService {
 
   async deleteConcept(
     p: Principal,
-    args: { project: string; id: string; actor: string; expectedRevision?: string }
+    args: { project: string; id: string; actor: string; expectedRevision?: string },
   ): Promise<DeleteConceptResult> {
     checkActor(args.actor, p);
     await this.assertProjectExists(args.project, true);
@@ -887,11 +853,7 @@ export class KnowledgeService {
     const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
       const buf = await this.storage.readFile(args.project, filePath);
       if (buf === null) {
-        throw new OkfError(
-          "not_found",
-          404,
-          `concept "${cleanId}" not found in project "${args.project}"`
-        );
+        throw new OkfError("not_found", 404, `concept "${cleanId}" not found in project "${args.project}"`);
       }
 
       const currentRev = blobRevision(buf);
@@ -939,7 +901,7 @@ export class KnowledgeService {
       content: string | Buffer;
       actor: string;
       expectedRevision?: string | null;
-    }
+    },
   ): Promise<WriteFileResult> {
     checkActor(args.actor, p);
     await this.assertProjectExists(args.project, true);
@@ -948,9 +910,7 @@ export class KnowledgeService {
     let newRev!: string;
 
     const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
-      const dataBuf = Buffer.isBuffer(args.content)
-        ? args.content
-        : Buffer.from(args.content, "utf8");
+      const dataBuf = Buffer.isBuffer(args.content) ? args.content : Buffer.from(args.content, "utf8");
 
       if (dataBuf.length > this.config.maxFileBytes) {
         throw new OkfError("payload_too_large", 413, "file exceeds MAX_FILE_BYTES");
@@ -1004,7 +964,7 @@ export class KnowledgeService {
 
   async deleteFile(
     p: Principal,
-    args: { project: string; path: string; actor: string; expectedRevision?: string | null }
+    args: { project: string; path: string; actor: string; expectedRevision?: string | null },
   ): Promise<DeleteFileResult> {
     checkActor(args.actor, p);
     await this.assertProjectExists(args.project, true);
@@ -1013,11 +973,7 @@ export class KnowledgeService {
     const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
       const existingBuf = await this.storage.readFile(args.project, cleanPath);
       if (existingBuf === null) {
-        throw new OkfError(
-          "not_found",
-          404,
-          `file "${cleanPath}" not found in project "${args.project}"`
-        );
+        throw new OkfError("not_found", 404, `file "${cleanPath}" not found in project "${args.project}"`);
       }
 
       const currentRev = blobRevision(existingBuf);
@@ -1059,7 +1015,7 @@ export class KnowledgeService {
 
   async deleteProject(
     p: Principal,
-    args: { project: string; actor: string }
+    args: { project: string; actor: string },
   ): Promise<{ project: string; commit: string | null; pushed: boolean | null; warnings: string[] }> {
     checkActor(args.actor, p);
     await this.assertProjectExists(args.project, true);
@@ -1095,7 +1051,7 @@ export class KnowledgeService {
 
   async importArchive(
     p: Principal,
-    args: { project: string; actor: string; archive: Buffer }
+    args: { project: string; actor: string; archive: Buffer },
   ): Promise<{
     project: string;
     conceptCount: number;
@@ -1113,7 +1069,7 @@ export class KnowledgeService {
       throw new OkfError(
         "payload_too_large",
         413,
-        `archive size (${args.archive.length}) exceeds MAX_ARCHIVE_BYTES (${this.config.maxArchiveBytes})`
+        `archive size (${args.archive.length}) exceeds MAX_ARCHIVE_BYTES (${this.config.maxArchiveBytes})`,
       );
     }
 
@@ -1130,10 +1086,7 @@ export class KnowledgeService {
       const staged = await fsBundleSource(stagingDir);
       const lintRes = await lintBundle(staged, new Date());
       const fatalErrors = lintRes.issues.filter(
-        (i) =>
-          i.severity === "error" &&
-          i.code !== "index_frontmatter" &&
-          i.code !== "index_no_sections"
+        (i) => i.severity === "error" && i.code !== "index_frontmatter" && i.code !== "index_no_sections",
       );
 
       if (fatalErrors.length > 0) {

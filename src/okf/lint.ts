@@ -1,11 +1,7 @@
 import { posix } from "node:path";
-import { splitFrontmatter, parseFrontmatter } from "./frontmatter.js";
-import {
-  ISO_DATETIME,
-  parseActor,
-  isStale,
-} from "./semantics.js";
-import { extractLinks, extractFootnoteLabels, computationBlocks, hasLegacyCitations } from "./markdown.js";
+import { parseFrontmatter, splitFrontmatter } from "./frontmatter.js";
+import { computationBlocks, extractFootnoteLabels, extractLinks, hasLegacyCitations } from "./markdown.js";
+import { ISO_DATETIME, isStale, parseActor } from "./semantics.js";
 
 export interface LintIssue {
   severity: "error" | "warning" | "info";
@@ -21,7 +17,7 @@ export function lintConceptFile(
     now: Date;
     conceptExists(id: string): boolean;
     fileExists(bundlePath: string): boolean;
-  }
+  },
 ): LintIssue[] {
   const issues: LintIssue[] = [];
 
