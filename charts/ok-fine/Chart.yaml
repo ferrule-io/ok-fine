@@ -2,8 +2,8 @@ apiVersion: v2
 name: ok-fine
 description: OKF v0.2 knowledge repository for AI agents (MCP + REST)
 type: application
-version: 0.3.0
-appVersion: "0.3.0"
+version: 0.3.1
+appVersion: "0.3.1"
 home: https://github.com/ferrule-io/ok-fine
 sources:
   - https://github.com/ferrule-io/ok-fine
