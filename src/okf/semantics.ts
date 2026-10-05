@@ -109,11 +109,11 @@ const AGENT_ACTOR_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._:+-]+$/;
 
 export function parseActor(s: string): { kind: "human" | "process" | "agent"; id: string } | null {
   const humanMatch = HUMAN_ACTOR_RE.exec(s);
-  if (humanMatch && humanMatch[1]) {
+  if (humanMatch?.[1]) {
     return { kind: "human", id: humanMatch[1] };
   }
   const processMatch = PROCESS_ACTOR_RE.exec(s);
-  if (processMatch && processMatch[1]) {
+  if (processMatch?.[1]) {
     return { kind: "process", id: processMatch[1] };
   }
   if (AGENT_ACTOR_RE.test(s)) {

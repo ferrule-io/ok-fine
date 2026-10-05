@@ -69,11 +69,11 @@ export function prependLogEntry(
 
     if (headingText === date) {
       const insertPos = matchIndex + fullMatch.length;
-      return text.slice(0, insertPos) + `* ${entry}\n` + text.slice(insertPos);
+      return `${text.slice(0, insertPos)}* ${entry}\n${text.slice(insertPos)}`;
     } else {
       const isLeadingNewline = fullMatch.startsWith("\n");
       const insertPos = isLeadingNewline ? matchIndex + 1 : matchIndex;
-      return text.slice(0, insertPos) + `## ${date}\n* ${entry}\n\n` + text.slice(insertPos);
+      return `${text.slice(0, insertPos)}## ${date}\n* ${entry}\n\n${text.slice(insertPos)}`;
     }
   } else {
     const titleMatch = /(?:^|\n)(#[ \t]+[^\r\n]+)(?:\r?\n|$)/.exec(text);

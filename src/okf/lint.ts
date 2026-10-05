@@ -495,9 +495,8 @@ export function lintIndexFile(path: string, text: string, isRoot: boolean): Lint
 export function lintLogFile(path: string, text: string): LintIssue[] {
   const issues: LintIssue[] = [];
   const headingRe = /(?:^|\n)##[ \t]+([^\r\n]+)/g;
-  let match: RegExpExecArray | null;
 
-  while ((match = headingRe.exec(text)) !== null) {
+  for (const match of text.matchAll(headingRe)) {
     const headingText = match[1]?.trim();
     if (!headingText || !/^\d{4}-\d{2}-\d{2}$/.test(headingText)) {
       issues.push({

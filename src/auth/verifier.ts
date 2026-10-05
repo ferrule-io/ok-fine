@@ -4,7 +4,7 @@ import {
   type OAuthTokenVerifier,
   type AuthInfo,
 } from "@modelcontextprotocol/server";
-import { createRemoteJWKSet, jwtVerify, errors, type JWTVerifyGetKey } from "jose";
+import { createRemoteJWKSet, jwtVerify, errors, type JWTVerifyGetKey, type JWTVerifyResult } from "jose";
 import type { Principal } from "../service/principal.js";
 
 export interface JwtTokenVerifierOptions {
@@ -41,7 +41,7 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    let result;
+    let result: JWTVerifyResult;
     try {
       result = await jwtVerify(token, this.jwks, {
         issuer: this.issuer,
@@ -148,8 +148,8 @@ export function principalFromAuthInfo(info: AuthInfo, scopeNames: ScopeNames): P
   const canWrite = hasWrite || hasAdmin;
   const canRead = hasRead || hasWrite || hasAdmin;
 
-  const extraSub = info.extra?.["sub"];
-  const extraIdentity = info.extra?.["identity"];
+  const extraSub = info.extra?.sub;
+  const extraIdentity = info.extra?.identity;
 
   const sub = typeof extraSub === "string" ? extraSub : "unknown";
   const identity = typeof extraIdentity === "string" ? extraIdentity : null;

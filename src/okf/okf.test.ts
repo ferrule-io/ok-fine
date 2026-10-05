@@ -37,8 +37,9 @@ generated: { by: test-agent/1.0, at: 2026-06-30T14:00:00Z }
 # Body Content
 `;
 
-    const split = splitFrontmatter(raw)!;
+    const split = splitFrontmatter(raw);
     expect(split).not.toBeNull();
+    if (!split) return;
     const parsed = parseFrontmatter(split.yaml);
     expect("doc" in parsed).toBe(true);
     if (!("doc" in parsed)) return;

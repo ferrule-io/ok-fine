@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { execSync } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -310,7 +310,7 @@ describe("KnowledgeService", () => {
       actor: "human:alice",
     });
 
-    const original = await service.writeConcept(alice, {
+    await service.writeConcept(alice, {
       project: "demo",
       id: "doc",
       frontmatter: { type: "Doc", title: "Original" },
@@ -344,7 +344,7 @@ describe("KnowledgeService", () => {
     expect(v3.derived?.trustTier).toBe("human-reviewed");
     expect(v3.derived?.generatedAt).toBe(originalGenerated);
     expect(Array.isArray(v3.frontmatter?.verified)).toBe(true);
-    expect((v3.frontmatter?.verified as unknown[]).length).toBe(2);
+    expect(v3.frontmatter?.verified).toHaveLength(2);
   });
 
   it("writeConcept echoing a different verified ignores it and leaves tier unchanged", async () => {
@@ -515,7 +515,7 @@ describe("KnowledgeService", () => {
     const bareDir = await createTempDir();
     execSync("git init --bare -b main", { cwd: bareDir });
 
-    const { service, storage, dataDir } = await setupService({
+    const { service, storage } = await setupService({
       GIT_REMOTE_URL: bareDir,
     });
 
@@ -686,8 +686,8 @@ title: Remote X
 
       header.fill(" ", 148, 156);
       let chksum = 0;
-      for (let i = 0; i < 512; i++) chksum += header[i]!;
-      const chkStr = chksum.toString(8).padStart(6, "0") + "\0 ";
+      for (const byte of header) chksum += byte;
+      const chkStr = `${chksum.toString(8).padStart(6, "0")}\0 `;
       header.write(chkStr, 148, 8);
 
       const endBlocks = Buffer.alloc(1024);

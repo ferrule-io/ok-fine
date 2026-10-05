@@ -205,13 +205,13 @@ export class GitBackend implements StorageBackend {
     const headRev = await repo.git.run(["rev-parse", "--verify", "HEAD"], { allowFail: true });
     let headHasCommits = headRev.code === 0;
 
-    if (repo.hasRemote) {
+    if (repo.hasRemote && config.gitRemoteUrl) {
       const remotes = await repo.git.run(["remote"], { allowFail: true });
       const remoteList = remotes.stdout.split(/\r?\n/).map((r) => r.trim());
       if (remoteList.includes("origin")) {
-        await repo.git.run(["remote", "set-url", "origin", config.gitRemoteUrl!]);
+        await repo.git.run(["remote", "set-url", "origin", config.gitRemoteUrl]);
       } else {
-        await repo.git.run(["remote", "add", "origin", config.gitRemoteUrl!]);
+        await repo.git.run(["remote", "add", "origin", config.gitRemoteUrl]);
       }
 
       const fetchRes = await repo.git.run(["fetch", "origin", config.gitBranch], { allowFail: true });
@@ -512,7 +512,6 @@ export class GitBackend implements StorageBackend {
                 const post = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
                 const diffRes = await this.git.run(["diff", "--name-only", pre, post]);
                 await this.resync(extractChangedProjects(diffRes.stdout));
-                continue; // retry push
               } else {
                 await this.git.run(["rebase", "--abort"], { allowFail: true });
                 await this.git.run(["reset", "--hard", `origin/${this.config.gitBranch}`]);
