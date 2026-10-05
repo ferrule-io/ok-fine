@@ -19,6 +19,7 @@ import { extractLinks } from "./markdown.js";
 import { renderIndex, type DirListing } from "./index-file.js";
 import { prependLogEntry } from "./log-file.js";
 import { lintConceptFile, lintLogFile } from "./lint.js";
+import { normalizeRepository } from "./repository.js";
 
 describe("OKF Core", () => {
   it("frontmatter round-trip keeps comments, unknown keys, flow generated, and string timestamps", () => {
@@ -261,5 +262,22 @@ def compute():
 `;
     const logIssues = lintLogFile("log.md", badLog);
     expect(logIssues.some((i) => i.code === "log_bad_date_heading")).toBe(true);
+  });
+});
+
+describe("normalizeRepository", () => {
+  it.each([
+    ["git@github.com:Acme/Shop.git", "github.com/acme/shop"],
+    ["https://user:tok@github.com/acme/shop.git/", "github.com/acme/shop"],
+    ["ssh://git@github.com:22/acme/shop", "github.com/acme/shop"],
+    ["github.com/acme/shop", "github.com/acme/shop"],
+    ["https://gitlab.example.com/Group/Sub/Repo", "gitlab.example.com/group/sub/repo"],
+    ["/home/me/repo", null],
+    ["file:///tmp/x", null],
+    ["acme/shop", null],
+    ["C:\\repo", null],
+    ["", null],
+  ])("%s -> %s", (input, expected) => {
+    expect(normalizeRepository(input)).toBe(expected);
   });
 });

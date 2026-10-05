@@ -6,13 +6,13 @@ import type { Principal } from "../service/principal.js";
 import type { KnowledgeService } from "../service/knowledge-service.js";
 import { VERSION } from "../version.js";
 
-export const INSTRUCTIONS = `ok-fine stores project knowledge as Open Knowledge Format (OKF) v0.2 bundles: one bundle per project, one markdown concept per file with YAML frontmatter.
-1. Discover: list_projects, then get_index (progressive disclosure) or search_concepts.
-2. Read: read_concept returns frontmatter, body, trust tier (unverified | machine-confirmed | human-reviewed), staleness, and inbound/outbound links. Prefer human-reviewed, non-stale concepts; deprecated concepts are history.
-3. Write: write_concept with frontmatter containing at least \`type\` (e.g. Reference, Decision, Playbook, API Endpoint, Metric, Attested Computation) plus \`title\`, \`description\`, \`tags\`. Record provenance in \`sources\` (each with \`resource\` and a stable \`id\`) and attribute claims with footnotes [^id]. Link related concepts with bundle-absolute links such as [orders](/tables/orders.md).
-4. Always pass \`actor\` as <producer>/<version> (e.g. claude-code/claude-opus-4-5). The server stamps \`generated\`; \`verified\` changes only through verify_concept.
-5. When updating, pass expectedRevision from read_concept so concurrent edits are not overwritten.
-6. Prefer \`status: deprecated\` over delete_concept. index.md and log.md are maintained by the server; do not write them.`;
+export const INSTRUCTIONS = `ok-fine holds shared project knowledge outside the codebase, as OKF v0.2 markdown concepts grouped into projects. In a git repository, first run \`git remote get-url origin\` and call list_projects with that URL as \`repository\`; use the returned project(s) for every read and write. If none match, say the repository is not onboarded and offer to onboard it (ok-fine-onboard skill). Search before non-trivial work; record durable decisions, conventions, and runbooks afterwards.
+1. Discover: get_index (progressive disclosure) or search_concepts with \`project\`.
+2. Read: read_concept returns frontmatter, body, trust tier (unverified | machine-confirmed | human-reviewed), staleness, and links. Prefer human-reviewed, non-stale concepts; deprecated concepts are history; when code contradicts a concept, trust the code and update the concept.
+3. Write: write_concept with frontmatter containing \`type\` (e.g. Decision, Convention, Architecture, Component, Playbook, Interface, Reference) plus \`title\`, \`description\`, \`tags\`. Record provenance in \`sources\` (each with \`resource\` and a stable \`id\`) and cite claims with footnotes [^id]. Link concepts with bundle-absolute links such as [orders](/tables/orders.md).
+4. Pass \`actor\` as <harness>/<model> (e.g. claude-code/claude-opus-4-5, codex/gpt-5-codex, gemini-cli/gemini-2.5-pro). Use human:<id> only when the user personally reviewed the concept. The server stamps \`generated\`; \`verified\` changes only through verify_concept.
+5. When updating, pass expectedRevision from read_concept (null to create only).
+6. Prefer \`status: deprecated\` over delete_concept. index.md and log.md are maintained by the server; do not write them. A project is bound to repositories through the \`repositories\` list in its overview frontmatter.`;
 
 const project = z.string().describe("Project (bundle) name, e.g. payments-api");
 const id = z.string().describe("Concept ID = bundle-relative path without .md, e.g. tables/orders");
@@ -83,11 +83,19 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
     "read",
     {
       title: "List projects",
-      description: "List every project (OKF bundle) with concept and staleness counts.",
-      inputSchema: z.object({}),
+      description:
+        "List projects (OKF bundles) with concept and staleness counts and the git repositories bound to each; pass repository to find the projects that hold a codebase's knowledge.",
+      inputSchema: z.object({
+        repository: z
+          .string()
+          .optional()
+          .describe(
+            "Git remote URL of the current repository, e.g. the output of `git remote get-url origin`; returns only the projects bound to it",
+          ),
+      }),
       annotations: readOnly,
     },
-    () => service.listProjects(),
+    (a) => service.listProjects({ repository: a.repository }),
   );
 
   tool(
