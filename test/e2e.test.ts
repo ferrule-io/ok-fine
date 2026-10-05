@@ -47,6 +47,29 @@ async function connect(token: string): Promise<Client> {
   );
   return client;
 }
+async function connectAnonymous(serverUrl: string): Promise<Client> {
+  const client = new Client({ name: "e2e", version: "1.0.0" });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${serverUrl}/mcp`)));
+  return client;
+}
+
+const ALL_TOOLS = [
+  "create_project",
+  "delete_concept",
+  "delete_file",
+  "delete_project",
+  "get_history",
+  "get_index",
+  "lint_project",
+  "list_projects",
+  "read_concept",
+  "read_file",
+  "search_concepts",
+  "sync_now",
+  "verify_concept",
+  "write_concept",
+  "write_file",
+].sort();
 
 interface ToolResult<T> {
   isError?: boolean;
@@ -175,5 +198,73 @@ describe("ok-fine end to end", () => {
     const challenge = res.headers.get("www-authenticate") ?? "";
     expect(challenge).toContain("insufficient_scope");
     expect(challenge).toContain('scope="okf:write"');
+  });
+});
+
+describe("ok-fine with AUTH_MODE=none", () => {
+  let noneServer: RunningServer;
+  let noneDataDir: string;
+
+  beforeAll(async () => {
+    noneDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "okf-"));
+    noneServer = await startServer(
+      loadConfig({
+        AUTH_MODE: "none",
+        PORT: "0",
+        HOST: "127.0.0.1",
+        DATA_DIR: noneDataDir,
+        PUBLIC_BASE_URL: PUBLIC,
+        LOG_LEVEL: "silent",
+      }),
+    );
+  });
+
+  afterAll(async () => {
+    await noneServer?.close();
+    if (noneDataDir) await fs.rm(noneDataDir, { recursive: true, force: true });
+  });
+
+  it("connects with no Authorization header and lists all tools including write and admin tools", async () => {
+    const client = await connectAnonymous(noneServer.url);
+    const { tools } = await client.listTools();
+    const toolNames = tools.map((t) => t.name).sort();
+    expect(toolNames).toEqual(ALL_TOOLS);
+    expect(toolNames).toEqual(
+      expect.arrayContaining(["create_project", "write_concept", "delete_project", "sync_now"]),
+    );
+    await client.close();
+  });
+
+  it("creates a project via MCP with actor e2e/1.0", async () => {
+    const client = await connectAnonymous(noneServer.url);
+    const created = await call(client, "create_project", {
+      project: "insecure-demo",
+      title: "Insecure Demo",
+      actor: "e2e/1.0",
+    });
+    expect(created.isError).toBeFalsy();
+    await client.close();
+  });
+
+  it("rejects REST write with human:dev actor with 403 forbidden_actor", async () => {
+    const res = await fetch(`${noneServer.url}/api/v1/projects/insecure-demo/concepts/notes`, {
+      method: "PUT",
+      headers: {
+        "content-type": "application/json",
+        "x-okf-actor": "human:dev",
+      },
+      body: JSON.stringify({
+        frontmatter: { type: "Reference" },
+        body: "# Notes\n",
+      }),
+    });
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error?: { code?: string } };
+    expect(body.error?.code).toBe("forbidden_actor");
+  });
+
+  it("returns 404 for oauth-protected-resource endpoint", async () => {
+    const res = await fetch(`${noneServer.url}/.well-known/oauth-protected-resource/mcp`);
+    expect(res.status).toBe(404);
   });
 });

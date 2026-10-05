@@ -15,7 +15,9 @@ config:
   logLevel: info
   maxFileBytes: 1048576
   maxArchiveBytes: 52428800
-oauth:
+auth:
+  mode: oidc         # oidc (default) validates JWTs from oauth.issuer; none disables authentication entirely — every request gets admin access; local testing only, never expose
+oauth:               # used only when auth.mode=oidc
   issuer: ""         # REQUIRED; must equal the access token `iss` exactly
   audiences: []      # default ["<publicBaseUrl>/mcp"]
   jwksUri: ""        # default: discovered from the issuer

@@ -1,3 +1,6 @@
+{{- if not (has .Values.auth.mode (list "oidc" "none")) -}}
+{{- fail "auth.mode must be \"oidc\" or \"none\"" -}}
+{{- end -}}
 {{- $auth := .Values.git.remote.auth -}}
 {{- if not (has $auth (list "none" "ssh" "https")) -}}
 {{- fail "git.remote.auth must be none, ssh, or https" -}}
@@ -67,6 +70,9 @@ spec:
               value: {{ .Values.config.maxFileBytes | int | quote }}
             - name: MAX_ARCHIVE_BYTES
               value: {{ .Values.config.maxArchiveBytes | int | quote }}
+            - name: AUTH_MODE
+              value: {{ .Values.auth.mode | quote }}
+            {{- if eq .Values.auth.mode "oidc" }}
             - name: OAUTH_ISSUER
               value: {{ required "oauth.issuer is required" .Values.oauth.issuer | quote }}
             {{- if .Values.oauth.audiences }}
@@ -87,6 +93,7 @@ spec:
               value: {{ join "," .Values.oauth.identityClaims | quote }}
             - name: OAUTH_ALLOW_INSECURE_ISSUER
               value: {{ .Values.oauth.allowInsecureIssuer | quote }}
+            {{- end }}
             - name: GIT_BRANCH
               value: {{ .Values.git.branch | quote }}
             {{- if .Values.git.remote.url }}

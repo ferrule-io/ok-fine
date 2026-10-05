@@ -8,9 +8,45 @@ describe("loadConfig", () => {
     const config = loadConfig(required);
     expect(config.port).toBe(8080);
     expect(config.publicBaseUrl).toBe("https://okf.example.com");
-    expect(config.oauthAudiences).toEqual(["https://okf.example.com/mcp"]);
-    expect(config.allowInsecureIssuer).toBe(false);
+    expect(config.auth).toEqual({
+      mode: "oidc",
+      issuer: "https://idp.example.com",
+      audiences: ["https://okf.example.com/mcp"],
+      identityClaims: ["preferred_username", "email", "sub"],
+      allowInsecureIssuer: false,
+    });
     expect(config.gitSyncIntervalSeconds).toBe(60);
+  });
+
+  it("defaults AUTH_MODE to oidc", () => {
+    const config = loadConfig(required);
+    expect(config.auth.mode).toBe("oidc");
+  });
+
+  it("loads with only PUBLIC_BASE_URL when AUTH_MODE=none", () => {
+    const config = loadConfig({ PUBLIC_BASE_URL: "https://okf.example.com", AUTH_MODE: "none" });
+    expect(config.auth).toEqual({ mode: "none" });
+  });
+
+  it("ignores malformed OIDC variables when AUTH_MODE=none", () => {
+    const config = loadConfig({
+      PUBLIC_BASE_URL: "https://okf.example.com",
+      AUTH_MODE: "none",
+      OAUTH_ALLOW_INSECURE_ISSUER: "yes",
+      OAUTH_JWKS_URI: "not a url",
+      OAUTH_ISSUER: "not a url",
+    });
+    expect(config.auth).toEqual({ mode: "none" });
+  });
+
+  it("rejects invalid AUTH_MODE with the message", () => {
+    expect(() => loadConfig({ ...required, AUTH_MODE: "invalid" })).toThrow("AUTH_MODE must be oidc or none");
+  });
+
+  it("rejects AUTH_MODE=oidc without OAUTH_ISSUER", () => {
+    expect(() => loadConfig({ PUBLIC_BASE_URL: "https://okf.example.com", AUTH_MODE: "oidc" })).toThrow(
+      "OAUTH_ISSUER is required",
+    );
   });
 
   it.each([
