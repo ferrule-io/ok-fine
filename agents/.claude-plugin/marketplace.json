@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "ok-fine",
-      "source": ".",
+      "source": "./",
       "description": "ok-fine knowledge skills and session hook"
     }
   ]
