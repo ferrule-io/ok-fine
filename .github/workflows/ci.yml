@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - development
+  pull_request:
+    branches:
+      - development
+      - main
   workflow_call:
 
 permissions:
@@ -67,6 +71,7 @@ jobs:
 
   image:
     name: Build image (${{ matrix.arch }})
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false

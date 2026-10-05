@@ -1,6 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { mkdir, readdir, readFile, rm, rename } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, rm } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { Readable } from "node:stream";
 import type { Document } from "yaml";
@@ -17,24 +16,24 @@ import {
 import { type ConceptRecord, parseConcept } from "../okf/concept.js";
 import {
   blobRevision,
-  isReservedName,
   normalizeConceptIdForWrite,
   normalizeFilePathForWrite,
   resolveReadPath,
   PROJECT_RE,
 } from "../okf/paths.js";
-import {
-  lintBundle,
-  regenerateIndexes,
-  buildDirListing,
-} from "../store/bundle.js";
+import { type BundleTree, buildDirListing, lintBundle, planIndexes } from "../store/bundle.js";
 import { extractBundleArchive } from "../store/archive.js";
-import { atomicWrite, isDirectory, pathExists } from "../store/fs-util.js";
+import { fsBundleSource } from "../store/fs-util.js";
 import type { Catalog, SearchParams, SearchHit } from "../store/catalog.js";
-import type { Repo, SyncStatus } from "../store/repo.js";
+import {
+  bundleSource,
+  type HistoryEntry,
+  type StorageBackend,
+  type StorageTx,
+  type SyncStatus,
+} from "../store/backend.js";
 import { type Principal, checkActor } from "./principal.js";
 import {
-  displayTitle,
   isStale,
   type Status,
   type TrustTier,
@@ -52,13 +51,6 @@ import {
 } from "../okf/log-file.js";
 import { type LintIssue, lintConceptFile } from "../okf/lint.js";
 import { renderIndex } from "../okf/index-file.js";
-
-/** Lint-context file check: true only for an existing path that stays inside the bundle. */
-function bundleFileExists(projectDir: string, bundlePath: string): boolean {
-  const normalized = posix.normalize(bundlePath.replace(/^\/+/, ""));
-  if (normalized === ".." || normalized.startsWith("../")) return false;
-  return existsSync(join(projectDir, normalized));
-}
 
 export interface ProjectSummary {
   project: string;
@@ -156,116 +148,85 @@ export interface DeleteFileResult {
 
 export class KnowledgeService {
   readonly config: Config;
-  readonly repo: Repo;
+  readonly storage: StorageBackend;
   readonly catalog: Catalog;
   readonly log: Logger;
 
-  constructor(opts: { config: Config; repo: Repo; catalog: Catalog; log: Logger }) {
+  constructor(opts: { config: Config; storage: StorageBackend; catalog: Catalog; log: Logger }) {
     this.config = opts.config;
-    this.repo = opts.repo;
+    this.storage = opts.storage;
     this.catalog = opts.catalog;
     this.log = opts.log;
 
-    this.catalog.setRepoDir(this.repo.repoDir);
-
-    this.repo.setTreeChangedHandler(async (changedProjects: string[]) => {
-      for (const project of changedProjects) {
-        const projectDir = join(this.repo.repoDir, project);
-        if (await pathExists(projectDir)) {
-          await this.catalog.rebuildProject(project);
-          const changed = await regenerateIndexes(
-            projectDir,
-            "all",
-            (id) => this.catalog.get(project, id)
-          );
-          if (changed.length > 0) {
-            await this.repo.commitInternal(
-              `okf(${project}): regenerate indexes`,
-              "process:ok-fine",
-              { subject: "system", clientId: "ok-fine" },
-              [project]
-            );
-          }
-        } else {
-          this.catalog.removeProject(project);
-        }
+    this.storage.setResyncHandler(async (project, tx) => {
+      const tree = await this.storage.tree(project);
+      if (tree.isEmpty) {
+        this.catalog.removeProject(project);
+        return;
       }
+      await this.catalog.rebuildProject(project, bundleSource(this.storage, project, tree));
+      await this.regenerateIndexes(tx, project, "all");
     });
   }
 
   async initialize(): Promise<void> {
-    const entries = await readdir(this.repo.repoDir);
-    const validProjects: string[] = [];
+    const tmpDir = join(this.config.dataDir, "tmp");
+    await rm(tmpDir, { recursive: true, force: true });
+    await mkdir(tmpDir, { recursive: true });
 
-    for (const entry of entries) {
-      if (entry.startsWith(".")) {
-        continue;
-      }
-      const absPath = join(this.repo.repoDir, entry);
-      if (await isDirectory(absPath)) {
-        if (PROJECT_RE.test(entry)) {
-          validProjects.push(entry);
-          await this.catalog.rebuildProject(entry);
-        } else {
-          this.log.warn(`Ignoring non-matching directory "${entry}" in repository root`);
-        }
-      }
+    const projects = await this.storage.projects();
+    for (const project of projects) {
+      const tree = await this.storage.tree(project);
+      await this.catalog.rebuildProject(project, bundleSource(this.storage, project, tree));
     }
 
-    // Mutex reconciliation: regenerate all indexes, ensure log.md, commit if changed
-    await this.repo.mutex.run(async () => {
-      let anyChanged = false;
-
-      for (const project of validProjects) {
-        const projectDir = join(this.repo.repoDir, project);
-        const changed = await regenerateIndexes(
-          projectDir,
-          "all",
-          (id) => this.catalog.get(project, id)
-        );
-        if (changed.length > 0) {
-          anyChanged = true;
-        }
-
-        const logPath = join(projectDir, "log.md");
-        if (!(await pathExists(logPath))) {
-          await atomicWrite(logPath, "# Update Log\n");
-          anyChanged = true;
+    // Reconciliation: regenerate all indexes and ensure log.md; the transaction commits only on change.
+    await this.storage.transaction({ projects }, async (tx) => {
+      for (const project of projects) {
+        await this.regenerateIndexes(tx, project, "all");
+        if (!(await this.storage.tree(project)).hasFile("log.md")) {
+          await tx.writeFile(project, "log.md", "# Update Log\n");
         }
       }
-
-      if (anyChanged) {
-        const commitSha = await this.repo.commitInternal(
-          "okf: regenerate indexes",
-          "process:ok-fine",
-          { subject: "system", clientId: "ok-fine" },
-          validProjects
-        );
-
-        if (commitSha && this.repo.hasRemote) {
-          const pushRes = await this.repo.git.run(
-            ["push", "origin", `HEAD:refs/heads/${this.config.gitBranch}`],
-            { allowFail: true }
-          );
-          if (pushRes.code !== 0) {
-            this.log.warn({ stderr: pushRes.stderr }, "Initial index push failed; continuing");
-          }
-        }
-      }
+      return {
+        value: undefined,
+        commit: {
+          subject: "okf: regenerate indexes",
+          author: "process:ok-fine",
+          principal: { subject: "system", clientId: "ok-fine" },
+        },
+      };
     });
   }
 
-  private async assertProjectExists(project: string, forWrite = false): Promise<string> {
-    // Every project-scoped path is built from this join; PROJECT_RE forbids `.`, `..`, and `/`.
+  /** Writes every index.md that differs from the planned content and deletes obsolete ones. */
+  private async regenerateIndexes(tx: StorageTx, project: string, dirs: string[] | "all"): Promise<void> {
+    const plan = planIndexes(await this.storage.tree(project), dirs, (id) => this.catalog.get(project, id));
+    for (const { path, content } of plan) {
+      if (content === null) {
+        await tx.deleteFile(project, path);
+      } else if ((await this.storage.readFile(project, path))?.toString("utf8") !== content) {
+        await tx.writeFile(project, path, content);
+      }
+    }
+  }
+
+  private async prependLog(tx: StorageTx, project: string, entry: string): Promise<void> {
+    const existing = (await this.storage.readFile(project, "log.md"))?.toString("utf8") ?? null;
+    await tx.writeFile(project, "log.md", prependLogEntry(existing, nowIso().slice(0, 10), entry));
+  }
+
+  private async assertProjectExists(project: string, forWrite = false): Promise<BundleTree> {
+    // Every project-scoped path is built from this name; PROJECT_RE forbids `.`, `..`, and `/`.
     if (!PROJECT_RE.test(project)) {
       throw new OkfError("invalid_id", 400, `invalid project name "${project}"`);
     }
-    const projectDir = join(this.repo.repoDir, project);
-    if (!(await pathExists(projectDir)) || !(await isDirectory(projectDir))) {
+    const tree = await this.storage.tree(project);
+    if (tree.isEmpty) {
       const msg = forWrite ? "call create_project first" : `project "${project}" not found`;
       throw new OkfError("project_not_found", 404, msg);
     }
-    return projectDir;
+    return tree;
   }
 
   listProjects(): { projects: ProjectSummary[] } {
@@ -350,21 +311,18 @@ export class KnowledgeService {
     project: string,
     dir = ""
   ): Promise<{ project: string; path: string; markdown: string; entries: IndexEntry[] }> {
-    const projectDir = await this.assertProjectExists(project);
+    const tree = await this.assertProjectExists(project);
 
     let cleanDir = "";
     if (dir && dir !== "/" && dir !== ".") {
       cleanDir = resolveReadPath(dir);
     }
 
-    const dirAbs = cleanDir === "" ? projectDir : join(projectDir, cleanDir);
-    if (!(await pathExists(dirAbs)) || !(await isDirectory(dirAbs))) {
+    if (!tree.hasDir(cleanDir)) {
       throw new OkfError("not_found", 404, `directory "${dir}" not found in project "${project}"`);
     }
 
-    const listing = await buildDirListing(projectDir, cleanDir, (id) =>
-      this.catalog.get(project, id)
-    );
+    const listing = buildDirListing(tree, cleanDir, (id) => this.catalog.get(project, id));
     const markdown = renderIndex(listing);
 
     const entries: IndexEntry[] = [];
@@ -405,7 +363,7 @@ export class KnowledgeService {
   }
 
   async readConcept(project: string, id: string): Promise<ConceptView> {
-    const projectDir = await this.assertProjectExists(project);
+    const tree = await this.assertProjectExists(project);
     let s = id;
     if (s.startsWith("/")) {
       s = s.slice(1);
@@ -414,20 +372,18 @@ export class KnowledgeService {
       s = s.slice(0, -3);
     }
     const cleanId = resolveReadPath(s);
-    const filePath = join(projectDir, `${cleanId}.md`);
-
-    if (!(await pathExists(filePath))) {
+    const buf = await this.storage.readFile(project, `${cleanId}.md`);
+    if (buf === null) {
       throw new OkfError("not_found", 404, `concept "${cleanId}" not found in project "${project}"`);
     }
 
-    const buf = await readFile(filePath);
     const text = buf.toString("utf8");
     const revision = blobRevision(buf);
 
     const ctx = {
       now: new Date(),
       conceptExists: (targetId: string) => this.catalog.get(project, targetId) !== undefined,
-      fileExists: (bundlePath: string) => bundleFileExists(projectDir, bundlePath),
+      fileExists: (bundlePath: string) => tree.exists(bundlePath),
     };
 
     const issues = lintConceptFile(`${cleanId}.md`, text, ctx);
@@ -515,18 +471,10 @@ export class KnowledgeService {
     project: string,
     id?: string,
     limit = 20
-  ): Promise<{
-    commits: Array<{
-      sha: string;
-      at: string;
-      actor: string;
-      subject: string;
-      principal: string | null;
-    }>;
-  }> {
+  ): Promise<{ commits: HistoryEntry[] }> {
     await this.assertProjectExists(project);
 
-    let path = `${project}/`;
+    let path: string | null = null;
     if (id) {
       let s = id;
       if (s.startsWith("/")) {
@@ -535,11 +483,10 @@ export class KnowledgeService {
       if (s.endsWith(".md")) {
         s = s.slice(0, -3);
       }
-      const cleanId = resolveReadPath(s);
-      path = `${project}/${cleanId}.md`;
+      path = `${resolveReadPath(s)}.md`;
     }
 
-    const commits = await this.repo.history(path, limit);
+    const commits = await this.storage.history(project, path, limit);
     return { commits };
   }
 
@@ -547,15 +494,13 @@ export class KnowledgeService {
     project: string,
     path: string
   ): Promise<{ project: string; path: string; revision: string; content: string }> {
-    const projectDir = await this.assertProjectExists(project);
+    await this.assertProjectExists(project);
     const cleanPath = resolveReadPath(path);
-    const absPath = join(projectDir, cleanPath);
-
-    if (!(await pathExists(absPath))) {
+    const buf = await this.storage.readFile(project, cleanPath);
+    if (buf === null) {
       throw new OkfError("not_found", 404, `file "${cleanPath}" not found in project "${project}"`);
     }
 
-    const buf = await readFile(absPath);
     if (buf.length > this.config.maxFileBytes) {
       throw new OkfError("payload_too_large", 413, "file exceeds MAX_FILE_BYTES");
     }
@@ -577,8 +522,8 @@ export class KnowledgeService {
   }
 
   async lint(project: string): Promise<{ project: string; conformant: boolean; issues: LintIssue[] }> {
-    const projectDir = await this.assertProjectExists(project);
-    const res = await lintBundle(projectDir, new Date());
+    const tree = await this.assertProjectExists(project);
+    const res = await lintBundle(bundleSource(this.storage, project, tree), new Date());
     return {
       project,
       conformant: res.conformant,
@@ -599,12 +544,11 @@ export class KnowledgeService {
       throw new OkfError("bad_request", 400, "project title must be between 1 and 200 characters");
     }
 
-    const projectDir = join(this.repo.repoDir, args.project);
-    if (await pathExists(projectDir)) {
+    if (!(await this.storage.tree(args.project)).isEmpty) {
       throw new OkfError("already_exists", 409, `project "${args.project}" already exists`);
     }
 
-    const txRes = await this.repo.transaction({ projects: [args.project] }, async () => {
+    const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
       const overviewBody =
         args.description && args.description.trim().length > 0
           ? `# Overview\n\n${args.description.trim()}\n`
@@ -623,18 +567,13 @@ export class KnowledgeService {
         generated: { by: args.actor, at: nowIso() },
       });
       const overviewContent = serializeConcept(fmRes.doc, overviewBody);
-      await atomicWrite(join(projectDir, "overview.md"), overviewContent);
-
-      const today = nowIso().slice(0, 10);
-      const initEntry = logInitializationEntry(args.actor);
-      const logContent = prependLogEntry(null, today, initEntry);
-      await atomicWrite(join(projectDir, "log.md"), logContent);
+      await tx.writeFile(args.project, "overview.md", overviewContent);
+      await this.prependLog(tx, args.project, logInitializationEntry(args.actor));
 
       const overviewBuf = Buffer.from(overviewContent, "utf8");
-      const record = parseConcept(args.project, "overview", "overview.md", overviewBuf);
-      await this.catalog.upsert(args.project, "overview", record);
+      this.catalog.upsert(parseConcept(args.project, "overview", "overview.md", overviewBuf));
 
-      await regenerateIndexes(projectDir, ["", "."], (id) => this.catalog.get(args.project, id));
+      await this.regenerateIndexes(tx, args.project, [""]);
 
       return {
         value: { project: args.project },
@@ -667,7 +606,7 @@ export class KnowledgeService {
     }
   ): Promise<WriteConceptResult> {
     checkActor(args.actor, p);
-    const projectDir = await this.assertProjectExists(args.project, true);
+    await this.assertProjectExists(args.project, true);
     const cleanId = normalizeConceptIdForWrite(args.id);
 
     if (
@@ -692,14 +631,14 @@ export class KnowledgeService {
       issues: LintIssue[];
     };
 
-    const txRes = await this.repo.transaction({ projects: [args.project] }, async () => {
-      const filePath = join(projectDir, `${cleanId}.md`);
+    const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
+      const filePath = `${cleanId}.md`;
       let existingDoc: Document | null = null;
       let existingRev: string | null = null;
       let existingRecord: ConceptRecord | null = null;
 
-      if (await pathExists(filePath)) {
-        const existingBuf = await readFile(filePath);
+      const existingBuf = await this.storage.readFile(args.project, filePath);
+      if (existingBuf !== null) {
         existingRev = blobRevision(existingBuf);
 
         if (args.expectedRevision === null) {
@@ -741,23 +680,14 @@ export class KnowledgeService {
         throw new OkfError("payload_too_large", 413, "concept exceeds MAX_FILE_BYTES");
       }
 
-      await atomicWrite(filePath, newBuf);
+      await tx.writeFile(args.project, filePath, newBuf);
       const newRev = blobRevision(newBuf);
 
-      const newRecord = parseConcept(args.project, cleanId, `${cleanId}.md`, newBuf);
-      await this.catalog.upsert(args.project, cleanId, newRecord);
+      const newRecord = parseConcept(args.project, cleanId, filePath, newBuf);
+      this.catalog.upsert(newRecord);
 
       const touchedDir = posix.dirname(cleanId) === "." ? "" : posix.dirname(cleanId);
-      await regenerateIndexes(projectDir, [touchedDir], (id) => this.catalog.get(args.project, id));
-
-      const today = nowIso().slice(0, 10);
-      const logPath = join(projectDir, "log.md");
-      let existingLog: string | null = null;
-      try {
-        existingLog = await readFile(logPath, "utf8");
-      } catch {
-        // not exists
-      }
+      await this.regenerateIndexes(tx, args.project, [touchedDir]);
 
       let logText: string;
       const title = newRecord.title;
@@ -767,14 +697,14 @@ export class KnowledgeService {
         const isDeprecating = newRecord.status === "deprecated" && prevStatus !== "deprecated";
         logText = logUpdateEntry(title, cleanId, args.actor, isDeprecating, args.message);
       }
+      await this.prependLog(tx, args.project, logText);
 
-      const updatedLog = prependLogEntry(existingLog, today, logText);
-      await atomicWrite(logPath, updatedLog);
+      const tree = await this.storage.tree(args.project);
 
       const issues = lintConceptFile(`${cleanId}.md`, newContent, {
         now: new Date(),
         conceptExists: (id: string) => this.catalog.get(args.project, id) !== undefined,
-        fileExists: (bundlePath: string) => bundleFileExists(projectDir, bundlePath),
+        fileExists: (bundlePath: string) => tree.exists(bundlePath),
       });
 
       resultPayload = {
@@ -817,7 +747,7 @@ export class KnowledgeService {
     args: { project: string; id: string; actor: string; expectedRevision?: string }
   ): Promise<VerifyConceptResult> {
     checkActor(args.actor, p);
-    const projectDir = await this.assertProjectExists(args.project, true);
+    await this.assertProjectExists(args.project, true);
 
     let s = args.id;
     if (s.startsWith("/")) {
@@ -827,13 +757,14 @@ export class KnowledgeService {
       s = s.slice(0, -3);
     }
     const cleanId = resolveReadPath(s);
-    const filePath = join(projectDir, `${cleanId}.md`);
+    const filePath = `${cleanId}.md`;
 
     let newTrustTier!: TrustTier;
     let newRev!: string;
 
-    const txRes = await this.repo.transaction({ projects: [args.project] }, async () => {
-      if (!(await pathExists(filePath))) {
+    const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
+      const buf = await this.storage.readFile(args.project, filePath);
+      if (buf === null) {
         throw new OkfError(
           "not_found",
           404,
@@ -841,7 +772,6 @@ export class KnowledgeService {
         );
       }
 
-      const buf = await readFile(filePath);
       const currentRev = blobRevision(buf);
 
       if (args.expectedRevision && args.expectedRevision !== currentRev) {
@@ -873,25 +803,14 @@ export class KnowledgeService {
       const newContent = serializeConcept(parsed.doc, split.body);
       const newBuf = Buffer.from(newContent, "utf8");
 
-      await atomicWrite(filePath, newBuf);
+      await tx.writeFile(args.project, filePath, newBuf);
       newRev = blobRevision(newBuf);
 
-      const newRecord = parseConcept(args.project, cleanId, `${cleanId}.md`, newBuf);
-      await this.catalog.upsert(args.project, cleanId, newRecord);
+      const newRecord = parseConcept(args.project, cleanId, filePath, newBuf);
+      this.catalog.upsert(newRecord);
       newTrustTier = newRecord.trustTier;
 
-      const today = nowIso().slice(0, 10);
-      const logPath = join(projectDir, "log.md");
-      let existingLog: string | null = null;
-      try {
-        existingLog = await readFile(logPath, "utf8");
-      } catch {
-        // not exists
-      }
-
-      const logText = logVerificationEntry(newRecord.title, cleanId, args.actor);
-      const updatedLog = prependLogEntry(existingLog, today, logText);
-      await atomicWrite(logPath, updatedLog);
+      await this.prependLog(tx, args.project, logVerificationEntry(newRecord.title, cleanId, args.actor));
 
       return {
         value: { revision: newRev, trustTier: newTrustTier },
@@ -919,7 +838,7 @@ export class KnowledgeService {
     args: { project: string; id: string; actor: string; expectedRevision?: string }
   ): Promise<DeleteConceptResult> {
     checkActor(args.actor, p);
-    const projectDir = await this.assertProjectExists(args.project, true);
+    await this.assertProjectExists(args.project, true);
 
     let s = args.id;
     if (s.startsWith("/")) {
@@ -929,12 +848,13 @@ export class KnowledgeService {
       s = s.slice(0, -3);
     }
     const cleanId = resolveReadPath(s);
-    const filePath = join(projectDir, `${cleanId}.md`);
+    const filePath = `${cleanId}.md`;
 
     let brokenInbound: string[] = [];
 
-    const txRes = await this.repo.transaction({ projects: [args.project] }, async () => {
-      if (!(await pathExists(filePath))) {
+    const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
+      const buf = await this.storage.readFile(args.project, filePath);
+      if (buf === null) {
         throw new OkfError(
           "not_found",
           404,
@@ -942,7 +862,6 @@ export class KnowledgeService {
         );
       }
 
-      const buf = await readFile(filePath);
       const currentRev = blobRevision(buf);
 
       if (args.expectedRevision && args.expectedRevision !== currentRev) {
@@ -953,24 +872,12 @@ export class KnowledgeService {
 
       brokenInbound = this.catalog.inbound(args.project, cleanId);
 
-      await rm(filePath, { force: true });
+      await tx.deleteFile(args.project, filePath);
       this.catalog.remove(args.project, cleanId);
 
       const touchedDir = posix.dirname(cleanId) === "." ? "" : posix.dirname(cleanId);
-      await regenerateIndexes(projectDir, [touchedDir], (id) => this.catalog.get(args.project, id));
-
-      const today = nowIso().slice(0, 10);
-      const logPath = join(projectDir, "log.md");
-      let existingLog: string | null = null;
-      try {
-        existingLog = await readFile(logPath, "utf8");
-      } catch {
-        // not exists
-      }
-
-      const logText = logDeletionEntry(cleanId, args.actor);
-      const updatedLog = prependLogEntry(existingLog, today, logText);
-      await atomicWrite(logPath, updatedLog);
+      await this.regenerateIndexes(tx, args.project, [touchedDir]);
+      await this.prependLog(tx, args.project, logDeletionEntry(cleanId, args.actor));
 
       return {
         value: { brokenInbound },
@@ -1003,13 +910,12 @@ export class KnowledgeService {
     }
   ): Promise<WriteFileResult> {
     checkActor(args.actor, p);
-    const projectDir = await this.assertProjectExists(args.project, true);
+    await this.assertProjectExists(args.project, true);
     const cleanPath = normalizeFilePathForWrite(args.path);
-    const filePath = join(projectDir, cleanPath);
 
     let newRev!: string;
 
-    const txRes = await this.repo.transaction({ projects: [args.project] }, async () => {
+    const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
       const dataBuf = Buffer.isBuffer(args.content)
         ? args.content
         : Buffer.from(args.content, "utf8");
@@ -1018,8 +924,8 @@ export class KnowledgeService {
         throw new OkfError("payload_too_large", 413, "file exceeds MAX_FILE_BYTES");
       }
 
-      if (await pathExists(filePath)) {
-        const existingBuf = await readFile(filePath);
+      const existingBuf = await this.storage.readFile(args.project, cleanPath);
+      if (existingBuf !== null) {
         const currentRev = blobRevision(existingBuf);
         if (args.expectedRevision === null) {
           throw new OkfError("already_exists", 409, `file "${cleanPath}" already exists`);
@@ -1037,24 +943,12 @@ export class KnowledgeService {
         }
       }
 
-      await atomicWrite(filePath, dataBuf);
+      await tx.writeFile(args.project, cleanPath, dataBuf);
       newRev = blobRevision(dataBuf);
 
       const touchedDir = posix.dirname(cleanPath) === "." ? "" : posix.dirname(cleanPath);
-      await regenerateIndexes(projectDir, [touchedDir], (id) => this.catalog.get(args.project, id));
-
-      const today = nowIso().slice(0, 10);
-      const logPath = join(projectDir, "log.md");
-      let existingLog: string | null = null;
-      try {
-        existingLog = await readFile(logPath, "utf8");
-      } catch {
-        // not exists
-      }
-
-      const logText = logFileUpdateEntry(cleanPath, args.actor);
-      const updatedLog = prependLogEntry(existingLog, today, logText);
-      await atomicWrite(logPath, updatedLog);
+      await this.regenerateIndexes(tx, args.project, [touchedDir]);
+      await this.prependLog(tx, args.project, logFileUpdateEntry(cleanPath, args.actor));
 
       return {
         value: { revision: newRev },
@@ -1081,12 +975,12 @@ export class KnowledgeService {
     args: { project: string; path: string; actor: string; expectedRevision?: string | null }
   ): Promise<DeleteFileResult> {
     checkActor(args.actor, p);
-    const projectDir = await this.assertProjectExists(args.project, true);
+    await this.assertProjectExists(args.project, true);
     const cleanPath = normalizeFilePathForWrite(args.path);
-    const filePath = join(projectDir, cleanPath);
 
-    const txRes = await this.repo.transaction({ projects: [args.project] }, async () => {
-      if (!(await pathExists(filePath))) {
+    const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
+      const existingBuf = await this.storage.readFile(args.project, cleanPath);
+      if (existingBuf === null) {
         throw new OkfError(
           "not_found",
           404,
@@ -1094,7 +988,6 @@ export class KnowledgeService {
         );
       }
 
-      const existingBuf = await readFile(filePath);
       const currentRev = blobRevision(existingBuf);
       if (args.expectedRevision === null) {
         throw new OkfError("revision_conflict", 409, "file exists but null expected", {
@@ -1107,23 +1000,11 @@ export class KnowledgeService {
         });
       }
 
-      await rm(filePath, { force: true });
+      await tx.deleteFile(args.project, cleanPath);
 
       const touchedDir = posix.dirname(cleanPath) === "." ? "" : posix.dirname(cleanPath);
-      await regenerateIndexes(projectDir, [touchedDir], (id) => this.catalog.get(args.project, id));
-
-      const today = nowIso().slice(0, 10);
-      const logPath = join(projectDir, "log.md");
-      let existingLog: string | null = null;
-      try {
-        existingLog = await readFile(logPath, "utf8");
-      } catch {
-        // not exists
-      }
-
-      const logText = logFileDeletionEntry(cleanPath, args.actor);
-      const updatedLog = prependLogEntry(existingLog, today, logText);
-      await atomicWrite(logPath, updatedLog);
+      await this.regenerateIndexes(tx, args.project, [touchedDir]);
+      await this.prependLog(tx, args.project, logFileDeletionEntry(cleanPath, args.actor));
 
       return {
         value: null,
@@ -1149,10 +1030,10 @@ export class KnowledgeService {
     args: { project: string; actor: string }
   ): Promise<{ project: string; commit: string | null; pushed: boolean | null; warnings: string[] }> {
     checkActor(args.actor, p);
-    const projectDir = await this.assertProjectExists(args.project, true);
+    await this.assertProjectExists(args.project, true);
 
-    const txRes = await this.repo.transaction({ projects: [args.project] }, async () => {
-      await rm(projectDir, { recursive: true, force: true });
+    const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
+      await tx.deleteProject(args.project);
       this.catalog.removeProject(args.project);
 
       return {
@@ -1174,11 +1055,10 @@ export class KnowledgeService {
   }
 
   exportArchive(project: string): Readable {
-    const projectDir = join(this.repo.repoDir, project);
     if (!PROJECT_RE.test(project) || !this.catalog.projects().includes(project)) {
       throw new OkfError("project_not_found", 404, `project "${project}" not found`);
     }
-    return this.repo.archiveStream(project);
+    return this.storage.archive(project);
   }
 
   async importArchive(
@@ -1215,7 +1095,8 @@ export class KnowledgeService {
         maxArchiveBytes: this.config.maxArchiveBytes,
       });
 
-      const lintRes = await lintBundle(stagingDir, new Date());
+      const staged = await fsBundleSource(stagingDir);
+      const lintRes = await lintBundle(staged, new Date());
       const fatalErrors = lintRes.issues.filter(
         (i) =>
           i.severity === "error" &&
@@ -1231,29 +1112,11 @@ export class KnowledgeService {
 
       let conceptCount = 0;
 
-      const txRes = await this.repo.transaction({ projects: [args.project] }, async () => {
-        const destDir = join(this.repo.repoDir, args.project);
-        if (await pathExists(destDir)) {
-          await rm(destDir, { recursive: true, force: true });
-        }
-
-        await rename(stagingDir, destDir);
-        await this.catalog.rebuildProject(args.project);
-
-        await regenerateIndexes(destDir, "all", (id) => this.catalog.get(args.project, id));
-
-        const logPath = join(destDir, "log.md");
-        let existingLog: string | null = null;
-        try {
-          existingLog = await readFile(logPath, "utf8");
-        } catch {
-          // not exists
-        }
-
-        const today = nowIso().slice(0, 10);
-        const logText = logImportEntry(args.actor);
-        const updatedLog = prependLogEntry(existingLog, today, logText);
-        await atomicWrite(logPath, updatedLog);
+      const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
+        await tx.replaceProject(args.project, staged);
+        await this.catalog.rebuildProject(args.project, staged);
+        await this.regenerateIndexes(tx, args.project, "all");
+        await this.prependLog(tx, args.project, logImportEntry(args.actor));
 
         conceptCount = this.catalog.records(args.project).length;
 
@@ -1275,17 +1138,15 @@ export class KnowledgeService {
         warnings: txRes.warnings,
       };
     } finally {
-      if (await pathExists(stagingDir)) {
-        await rm(stagingDir, { recursive: true, force: true });
-      }
+      await rm(stagingDir, { recursive: true, force: true });
     }
   }
 
   async syncNow(): Promise<SyncStatus> {
-    return this.repo.sync();
+    return this.storage.sync();
   }
 
   async syncStatus(): Promise<SyncStatus> {
-    return this.repo.syncStatus();
+    return this.storage.syncStatus();
   }
 }

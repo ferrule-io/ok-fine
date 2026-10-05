@@ -23,8 +23,8 @@ Dependencies point downward only:
 | Layer | Path | Rule |
 |---|---|---|
 | Format | `src/okf/` | Pure functions, no I/O. All OKF v0.2 rules live here. |
-| Storage | `src/store/` | Git, filesystem, in-memory catalog/search, archives. |
-| Service | `src/service/knowledge-service.ts` | One method per operation. MCP and REST must both call this; never put business logic in transports. |
+| Storage | `src/store/` | `StorageBackend` contract (`backend.ts`), its git implementation (`git-backend.ts`), bundle model, in-memory catalog/search, archives. |
+| Service | `src/service/knowledge-service.ts` | One method per operation. MCP and REST must both call this; never put business logic in transports. Depends only on `StorageBackend`: no repo paths or fs calls except import staging under `DATA_DIR/tmp`. |
 | Transport | `src/mcp/`, `src/http/` | Input validation (zod), permission checks, response shaping. |
 | Wiring | `src/server.ts` | `startServer(config)`. Shared by `src/main.ts` and `test/e2e.test.ts`; keep all wiring here. |
 | Auth | `src/auth/` | JWT resource server. ok-fine never issues tokens. |
@@ -41,11 +41,12 @@ Break any of these and you have a bug.
   `verify_concept` (`appendVerification`).
 - **Generated files:** ok-fine owns every `index.md` (regenerated deterministically after every mutation, import,
   and sync) and the project-root `log.md`. Don't add code paths that let clients write them.
-- **Git state:** all git mutations go through `Repo.transaction()` or `Repo.sync()`; both hold the single
-  in-process mutex.
-  - The tree-changed handler (`setTreeChangedHandler`) runs with the mutex already held, so it must use
-    `commitInternal`, never `transaction()` (that deadlocks).
-  - Reads never lock; atomic renames (`atomicWrite`) keep them consistent.
+- **Storage state:** all mutations go through `StorageBackend.transaction()` (via its `StorageTx`) or `sync()`;
+  in `GitBackend` both hold the single in-process mutex.
+  - The resync handler (`setResyncHandler`) runs with the mutex already held and receives its own `StorageTx`;
+    it must never call `transaction()` (that deadlocks).
+  - Reads never lock. File/dir existence and listings come from the in-memory path index (`PathIndex`), which
+    every `StorageTx` write/delete updates and every resync rebuilds; never bypass `StorageTx` to touch the repo.
 - **Never lose local commits:** on rebase conflict, `preserveConflict()` keeps them on `ok-fine/conflict-<stamp>`
   (local branch, plus remote when the push succeeds) before resetting.
 - **Path safety:**

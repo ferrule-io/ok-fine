@@ -1,22 +1,25 @@
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { join, posix } from "node:path";
 import type { Readable } from "node:stream";
 import type { Config, Logger } from "../config.js";
 import { OkfError } from "../errors.js";
 import { nowIso } from "../okf/frontmatter.js";
 import { PROJECT_RE } from "../okf/paths.js";
+import type {
+  BundleSource,
+  CommitSpec,
+  HistoryEntry,
+  ResyncHandler,
+  StorageBackend,
+  StorageTx,
+  SyncStatus,
+  TransactionResult,
+} from "./backend.js";
+import type { BundleTree } from "./bundle.js";
 import { Git, isPushRejection, redactRemote } from "./git.js";
 import { Mutex } from "./mutex.js";
-import { pathExists } from "./fs-util.js";
-
-export interface SyncStatus {
-  remote: string | null;
-  branch: string;
-  lastSyncAt: string | null;
-  lastError: string | null;
-  ahead: number;
-  behind: number;
-}
+import { atomicWrite, isDirectory, listTreeFiles, pathExists } from "./fs-util.js";
+import { PathIndex } from "./path-index.js";
 
 function extractChangedProjects(diffOutput: string): string[] {
   const lines = diffOutput.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
@@ -30,61 +33,167 @@ function extractChangedProjects(diffOutput: string): string[] {
   return Array.from(projects);
 }
 
-export class Repo {
+/** Mutations against the working tree; keeps the path index in step with disk. */
+class GitTx implements StorageTx {
+  touched = false;
+
+  constructor(
+    private readonly repoDir: string,
+    private readonly index: PathIndex
+  ) {}
+
+  async writeFile(project: string, path: string, content: string | Buffer): Promise<void> {
+    await atomicWrite(join(this.repoDir, project, path), content);
+    this.index.add(project, path);
+    this.touched = true;
+  }
+
+  async deleteFile(project: string, path: string): Promise<void> {
+    const projectDir = join(this.repoDir, project);
+    await rm(join(projectDir, path), { force: true });
+    let dir = posix.dirname(path);
+    while (dir !== "." && dir !== "") {
+      const abs = join(projectDir, dir);
+      try {
+        if ((await readdir(abs)).length > 0) {
+          break;
+        }
+        await rmdir(abs);
+      } catch {
+        break;
+      }
+      dir = posix.dirname(dir);
+    }
+    this.index.remove(project, path);
+    this.touched = true;
+  }
+
+  async deleteProject(project: string): Promise<void> {
+    await rm(join(this.repoDir, project), { recursive: true, force: true });
+    this.index.setProject(project, []);
+    this.touched = true;
+  }
+
+  async replaceProject(project: string, source: BundleSource): Promise<void> {
+    const projectDir = join(this.repoDir, project);
+    await rm(projectDir, { recursive: true, force: true });
+    const written: string[] = [];
+    for (const path of source.paths) {
+      const content = await source.read(path);
+      if (content !== null) {
+        await atomicWrite(join(projectDir, path), content);
+        written.push(path);
+      }
+    }
+    this.index.setProject(project, written);
+    this.touched = true;
+  }
+}
+
+export class GitBackend implements StorageBackend {
   readonly config: Config;
   readonly log: Logger;
   readonly repoDir: string;
   readonly homeDir: string;
-  readonly tmpDir: string;
   readonly git: Git;
-  readonly mutex: Mutex;
+  private readonly mutex = new Mutex();
+  private readonly index = new PathIndex();
 
-  private treeChangedHandler: ((projects: string[]) => Promise<void>) | null = null;
+  private resyncHandler: ResyncHandler | null = null;
   private lastSyncAt: string | null = null;
   private lastError: string | null = null;
 
-  constructor(config: Config, log: Logger, repoDir: string, homeDir: string, tmpDir: string) {
+  constructor(config: Config, log: Logger, repoDir: string, homeDir: string) {
     this.config = config;
     this.log = log;
     this.repoDir = repoDir;
     this.homeDir = homeDir;
-    this.tmpDir = tmpDir;
     this.git = new Git(repoDir, homeDir, config);
-    this.mutex = new Mutex();
   }
 
   get hasRemote(): boolean {
     return Boolean(this.config.gitRemoteUrl && this.config.gitRemoteUrl.trim().length > 0);
   }
 
-  setTreeChangedHandler(fn: (projects: string[]) => Promise<void>): void {
-    this.treeChangedHandler = fn;
+  setResyncHandler(handler: ResyncHandler): void {
+    this.resyncHandler = handler;
   }
 
-  async idle(): Promise<void> {
+  async close(): Promise<void> {
     await this.mutex.idle();
   }
 
-  static async open(config: Config, log: Logger): Promise<Repo> {
+  async projects(): Promise<string[]> {
+    return this.index.projects();
+  }
+
+  async tree(project: string): Promise<BundleTree> {
+    return this.index.tree(project);
+  }
+
+  async readFile(project: string, path: string): Promise<Buffer | null> {
+    if (!this.index.tree(project).hasFile(path)) {
+      return null;
+    }
+    try {
+      return await readFile(join(this.repoDir, project, path));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  private async reindexProject(project: string): Promise<void> {
+    const dir = join(this.repoDir, project);
+    const paths = (await isDirectory(dir)) ? await listTreeFiles(dir) : [];
+    this.index.setProject(project, paths);
+  }
+
+  private async reindexAll(): Promise<void> {
+    this.index.clear();
+    const entries = await readdir(this.repoDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") || !entry.isDirectory()) {
+        continue;
+      }
+      if (PROJECT_RE.test(entry.name)) {
+        await this.reindexProject(entry.name);
+      } else {
+        this.log.warn(`Ignoring non-matching directory "${entry.name}" in repository root`);
+      }
+    }
+  }
+
+  /** Reindexes projects whose stored content changed underneath the service and lets the handler catch up. */
+  private async resync(projects: string[]): Promise<void> {
+    for (const project of new Set(projects)) {
+      await this.reindexProject(project);
+      if (!this.resyncHandler) {
+        continue;
+      }
+      const tx = new GitTx(this.repoDir, this.index);
+      await this.resyncHandler(project, tx);
+      if (tx.touched) {
+        await this.commitInternal(
+          `okf(${project}): regenerate indexes`,
+          "process:ok-fine",
+          { subject: "system", clientId: "ok-fine" },
+          [project]
+        );
+      }
+    }
+  }
+
+  static async open(config: Config, log: Logger): Promise<GitBackend> {
     const repoDir = join(config.dataDir, "repo");
     const homeDir = join(config.dataDir, "home");
-    const tmpDir = join(config.dataDir, "tmp");
 
     await mkdir(repoDir, { recursive: true });
     await mkdir(homeDir, { recursive: true });
-    await mkdir(tmpDir, { recursive: true });
 
-    // Empty tmp directory
-    try {
-      const tmpEntries = await readdir(tmpDir);
-      for (const entry of tmpEntries) {
-        await rm(join(tmpDir, entry), { recursive: true, force: true });
-      }
-    } catch {
-      // ignore
-    }
-
-    const repo = new Repo(config, log, repoDir, homeDir, tmpDir);
+    const repo = new GitBackend(config, log, repoDir, homeDir);
     await repo.git.prepareSsh();
 
     // Check if git initialized
@@ -179,6 +288,7 @@ export class Repo {
       }
     }
 
+    await repo.reindexAll();
     return repo;
   }
 
@@ -240,7 +350,7 @@ export class Repo {
     return changed;
   }
 
-  async commitInternal(
+  private async commitInternal(
     subject: string,
     author: string,
     principal: { subject: string; clientId: string },
@@ -300,16 +410,8 @@ export class Repo {
 
   async transaction<T>(
     spec: { projects: string[] },
-    work: () => Promise<{
-      value: T;
-      commit: {
-        subject: string;
-        body?: string;
-        author: string;
-        principal: { subject: string; clientId: string };
-      } | null;
-    }>
-  ): Promise<{ value: T; commit: string | null; pushed: boolean | null; warnings: string[] }> {
+    work: (tx: StorageTx) => Promise<{ value: T; commit: CommitSpec | null }>
+  ): Promise<TransactionResult<T>> {
     return this.mutex.run(async () => {
       const warnings: string[] = [];
 
@@ -343,10 +445,7 @@ export class Repo {
             const after = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
             if (before !== after) {
               const diffRes = await this.git.run(["diff", "--name-only", before, after]);
-              const changed = extractChangedProjects(diffRes.stdout);
-              if (this.treeChangedHandler && changed.length > 0) {
-                await this.treeChangedHandler(changed);
-              }
+              await this.resync(extractChangedProjects(diffRes.stdout));
             }
           }
         }
@@ -354,7 +453,7 @@ export class Repo {
 
       // Step 2 & 3: Run work and commit
       try {
-        const workRes = await work();
+        const workRes = await work(new GitTx(this.repoDir, this.index));
 
         let commitSha: string | null = null;
         if (workRes.commit) {
@@ -412,17 +511,12 @@ export class Repo {
               if (rebaseRes.code === 0) {
                 const post = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
                 const diffRes = await this.git.run(["diff", "--name-only", pre, post]);
-                const changed = extractChangedProjects(diffRes.stdout);
-                if (this.treeChangedHandler && changed.length > 0) {
-                  await this.treeChangedHandler(changed);
-                }
+                await this.resync(extractChangedProjects(diffRes.stdout));
                 continue; // retry push
               } else {
                 await this.git.run(["rebase", "--abort"], { allowFail: true });
                 await this.git.run(["reset", "--hard", `origin/${this.config.gitBranch}`]);
-                if (this.treeChangedHandler && spec.projects.length > 0) {
-                  await this.treeChangedHandler(spec.projects);
-                }
+                await this.resync(spec.projects);
                 throw new OkfError(
                   "upstream_conflict",
                   409,
@@ -453,9 +547,7 @@ export class Repo {
         const cleanArgs =
           spec.projects.length > 0 ? ["clean", "-fd", "--", ...spec.projects] : ["clean", "-fd"];
         await this.git.run(cleanArgs, { allowFail: true });
-        if (this.treeChangedHandler && spec.projects.length > 0) {
-          await this.treeChangedHandler(spec.projects);
-        }
+        await this.resync(spec.projects);
         throw err;
       }
     });
@@ -497,10 +589,7 @@ export class Repo {
         const after = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
         if (before !== after) {
           const diffRes = await this.git.run(["diff", "--name-only", before, after]);
-          const changed = extractChangedProjects(diffRes.stdout);
-          if (this.treeChangedHandler && changed.length > 0) {
-            await this.treeChangedHandler(changed);
-          }
+          await this.resync(extractChangedProjects(diffRes.stdout));
         }
       }
 
@@ -561,10 +650,7 @@ export class Repo {
     };
   }
 
-  async history(
-    path?: string,
-    limit = 20
-  ): Promise<Array<{ sha: string; at: string; actor: string; subject: string; principal: string | null }>> {
+  async history(project: string, path: string | null, limit: number): Promise<HistoryEntry[]> {
     const clampedLimit = Math.max(1, Math.min(100, limit));
     const args = [
       "log",
@@ -572,9 +658,7 @@ export class Repo {
       String(clampedLimit),
       "--format=%H%x1f%aI%x1f%an%x1f%s%x1f%(trailers:key=Okf-Principal,valueonly)%x1e",
     ];
-    if (path) {
-      args.push("--", path);
-    }
+    args.push("--", path === null ? `${project}/` : `${project}/${path}`);
 
     const res = await this.git.run(args, { allowFail: true });
     if (res.code !== 0) {
@@ -582,13 +666,7 @@ export class Repo {
     }
 
     const entries = res.stdout.split("\x1e").filter((e) => e.trim().length > 0);
-    const commits: Array<{
-      sha: string;
-      at: string;
-      actor: string;
-      subject: string;
-      principal: string | null;
-    }> = [];
+    const commits: HistoryEntry[] = [];
 
     for (const entry of entries) {
       const parts = entry.trim().split("\x1f");
@@ -609,7 +687,7 @@ export class Repo {
     return commits;
   }
 
-  archiveStream(project: string): Readable {
+  archive(project: string): Readable {
     return this.git.spawnStdout(["archive", "--format=tar.gz", "HEAD", "--", project]);
   }
 }

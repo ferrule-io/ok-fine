@@ -17,7 +17,7 @@ import { registerMcpRoute } from "./http/mcp-route.js";
 import { registerRestRoutes } from "./http/rest.js";
 import { createMcpServer } from "./mcp/server.js";
 import { Catalog } from "./store/catalog.js";
-import { Repo } from "./store/repo.js";
+import { GitBackend } from "./store/git-backend.js";
 import { KnowledgeService } from "./service/knowledge-service.js";
 import type { Principal } from "./service/principal.js";
 
@@ -85,9 +85,9 @@ export async function startServer(config: Config): Promise<RunningServer> {
     dangerouslyAllowInsecureIssuerUrl: config.allowInsecureIssuer,
   });
 
-  const repo = await Repo.open(config, app.log);
+  const storage = await GitBackend.open(config, app.log);
   const catalog = new Catalog();
-  const service = new KnowledgeService({ config, repo, catalog, log: app.log });
+  const service = new KnowledgeService({ config, storage, catalog, log: app.log });
   await service.initialize();
 
   const verifier = new JwtTokenVerifier({
@@ -185,7 +185,7 @@ export async function startServer(config: Config): Promise<RunningServer> {
       stopped = true;
       clearTimeout(syncTimer);
       await app.close();
-      await repo.idle();
+      await storage.close();
       await mcpHandler.close();
     },
   };
