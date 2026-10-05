@@ -6,7 +6,7 @@
   "author": {
     "name": "ferrule-io"
   },
-  "homepage": "https://github.com/ferrule-io/ok-fine#using-ok-fine-from-coding-agents",
+  "homepage": "https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents",
   "repository": "https://github.com/ferrule-io/ok-fine",
   "license": "Apache-2.0",
   "keywords": ["okf", "knowledge", "mcp", "memory"]
