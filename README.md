@@ -98,33 +98,29 @@ commit trailer.
 
 ## Quick start (local)
 
-Requires Node 24 and pnpm 11 (`mise install` sets both up), plus `git`, `curl`, and `jq` for the examples.
+Requires Node 24 and pnpm 11 (`mise install` sets both up), plus `git` and `curl` for the examples.
+
+> **Warning:** `AUTH_MODE=none` disables authentication completely and gives every caller full admin access. Never expose it beyond localhost.
 
 ```sh
 pnpm install
 pnpm build
 
-# Terminal 1: development token issuer (NOT for production)
-DEV_ISSUER_PORT=9000 DEV_ISSUER_URL=http://localhost:9000 \
-DEV_ISSUER_AUDIENCE=http://localhost:8080/mcp \
-node dist/dev/issuer-cli.js
-
-# Terminal 2: ok-fine
-PUBLIC_BASE_URL=http://localhost:8080 \
-OAUTH_ISSUER=http://localhost:9000 \
-OAUTH_ALLOW_INSECURE_ISSUER=true \
-DATA_DIR=$(mktemp -d) \
-node dist/main.js
+HOST=127.0.0.1 PUBLIC_BASE_URL=http://localhost:8080 AUTH_MODE=none DATA_DIR=$(mktemp -d) node dist/main.js
 ```
 
-Mint a token and create a project:
+Or run with Docker (the image runs as user `node` with `/data` as the default `DATA_DIR`):
 
 ```sh
-TOKEN=$(curl -s -X POST localhost:9000/token \
-  -d 'scope=okf:read okf:write okf:admin' -d username=dev | jq -r .access_token)
+docker build -t ok-fine .
+docker run --rm -p 127.0.0.1:8080:8080 -e AUTH_MODE=none -e PUBLIC_BASE_URL=http://localhost:8080 -v okf-data:/data ok-fine
+```
 
+Create a project, write a concept, and search:
+
+```sh
 curl -s -X POST localhost:8080/api/v1/projects \
-  -H "authorization: Bearer $TOKEN" -H 'x-okf-actor: human:dev' \
+  -H 'x-okf-actor: cli/1.0' \
   -H 'content-type: application/json' \
   -d '{"project":"demo","title":"Demo"}'
 
@@ -142,10 +138,10 @@ Joined with [customers](/tables/customers.md) on `customer_id`.
 EOF
 
 curl -s -X PUT localhost:8080/api/v1/projects/demo/concepts/tables/orders \
-  -H "authorization: Bearer $TOKEN" -H 'x-okf-actor: cli/1.0' \
+  -H 'x-okf-actor: cli/1.0' \
   -H 'content-type: text/markdown' --data-binary @orders.md
 
-curl -s "localhost:8080/api/v1/search?q=orders" -H "authorization: Bearer $TOKEN"
+curl -s "localhost:8080/api/v1/search?q=orders"
 ```
 
 ## Connecting an MCP client
@@ -153,9 +149,22 @@ curl -s "localhost:8080/api/v1/search?q=orders" -H "authorization: Bearer $TOKEN
 The MCP endpoint is `<PUBLIC_BASE_URL>/mcp`. It serves the `2026-07-28` protocol and the legacy `2025-11-25`,
 `2025-06-18`, and `2025-03-26` protocols statelessly.
 
-Clients that support MCP authorization discover the identity provider from the 401 challenge
+When running with `AUTH_MODE=none`, no `Authorization` header or OAuth configuration is needed; point clients directly at `http://localhost:8080/mcp`:
+
+```json
+{
+  "mcpServers": {
+    "ok-fine": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp"
+    }
+  }
+}
+```
+
+In `AUTH_MODE=oidc`, clients that support MCP authorization discover the identity provider from the 401 challenge
 (`WWW-Authenticate: Bearer … resource_metadata="<PUBLIC_BASE_URL>/.well-known/oauth-protected-resource/mcp"`).
-Clients that take a static header can pass `Authorization: Bearer <token>` directly.
+Clients that take a static header can pass `Authorization: Bearer <token>` directly:
 
 ```json
 {
@@ -281,7 +290,7 @@ A client only sees the tools its token's scopes allow.
 
 ## REST API
 
-All routes are under `/api/v1` and require `Authorization: Bearer <token>`. Write and admin routes require an
+All routes are under `/api/v1` and require `Authorization: Bearer <token>` in `oidc` mode (in `none` mode, no token is required). Write and admin routes require an
 `X-OKF-Actor` header. Responses carrying a revision set `ETag`; send `If-Match: "<revision>"` for conditional
 updates or `If-None-Match: *` for create-only PUTs of concepts and files (other routes reject it with 400).
 
@@ -311,13 +320,37 @@ Errors use one shape: `{ "error": { "code", "message", "details"? } }`. Codes in
 `invalid_actor`, `forbidden_actor`, `project_not_found`, `not_found`, `already_exists`, `revision_conflict`,
 `upstream_conflict`, `payload_too_large`, `unsupported_media`, and `bundle_not_conformant`.
 
-Unauthenticated endpoints: `GET /healthz`, `GET /.well-known/oauth-protected-resource[/mcp]`,
-`GET /.well-known/oauth-authorization-server`.
+Unauthenticated endpoints: `GET /healthz` (always unauthenticated). In `oidc` mode, the OAuth discovery routes
+`GET /.well-known/oauth-protected-resource[/mcp]` and `GET /.well-known/oauth-authorization-server` are also
+unauthenticated. In `none` mode, all MCP and API endpoints accept unauthenticated requests, and OAuth discovery
+routes are not registered (return 404).
 
 ## Authentication and authorization
 
-ok-fine is an OAuth 2.1 **resource server only**. It issues no tokens; it validates JWT access tokens from any
-OIDC / RFC 8414 provider (Keycloak, Auth0, Okta, Zitadel, …).
+ok-fine supports two authentication modes configured via `AUTH_MODE`:
+
+- **`oidc` (default):** ok-fine acts as an OAuth 2.1 **resource server only**. It issues no tokens; it validates JWT
+  access tokens from any OIDC / RFC 8414 provider (Keycloak, Auth0, Okta, Zitadel, …).
+- **`none`:** Insecure mode for local development and Docker testing. Authentication is completely disabled.
+
+### Insecure mode (`AUTH_MODE=none`)
+
+When `AUTH_MODE=none`:
+
+- `OAUTH_ISSUER` is not required; all `OAUTH_*` environment variables are ignored (scope names still use defaults or configured values).
+- No authorization-server discovery is performed at startup.
+- Discovery endpoints (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp`, and `/.well-known/oauth-authorization-server`) are **not registered** (return 404).
+- Every request to `/mcp` and `/api/v1/*` is accepted without an `Authorization` header (the header is ignored if present) and is assigned an anonymous principal:
+  - Subject: `anonymous`
+  - Client ID: `anonymous`
+  - Identity: `null`
+  - Scopes: read, write, and admin scopes (full admin access: `canRead`, `canWrite`, `canAdmin` all true)
+- Because identity is `null`, `human:<id>` actors are rejected with `forbidden_actor`. Use `<producer>/<version>` (e.g. `cli/1.0`, `claude-code/claude-opus-4-5`) or `process:<id>` actors instead.
+- A warning is logged at startup. **Never expose `AUTH_MODE=none` beyond localhost.**
+
+### OIDC mode (`AUTH_MODE=oidc`)
+
+In `oidc` mode:
 
 1. At startup it discovers the provider metadata from `OAUTH_ISSUER` and fetches its JWKS.
 2. Each request's token is checked for signature, `iss` (exact match with `OAUTH_ISSUER`), `aud` (one of
@@ -341,8 +374,7 @@ To configure your provider:
 - `human:<id>` actors are accepted only when `<id>` equals the first claim found in `OAUTH_IDENTITY_CLAIMS`
   (default `preferred_username`, then `email`, then `sub`).
 
-`src/dev/issuer.ts` (`node dist/dev/issuer-cli.js`) is an unauthenticated token minter for development and tests.
-**Never expose it in production.**
+For exercising OIDC locally or running tests without an external provider, `src/dev/issuer.ts` (`node dist/dev/issuer-cli.js`) provides an unauthenticated token minter. **Never expose it in production.**
 
 ## Git storage and remote sync
 
@@ -379,12 +411,13 @@ variable.
 | Variable | Default | Description |
 |---|---|---|
 | `PUBLIC_BASE_URL` | **required** | External URL, e.g. `https://okf.example.com`. Used in OAuth metadata. |
-| `OAUTH_ISSUER` | **required** | Must equal the token `iss` exactly |
-| `OAUTH_AUDIENCE` | `<PUBLIC_BASE_URL>/mcp` | Comma-separated accepted audiences |
-| `OAUTH_JWKS_URI` | discovered | Override the JWKS URL |
-| `OAUTH_SCOPE_READ` / `_WRITE` / `_ADMIN` | `okf:read` / `okf:write` / `okf:admin` | Scope names |
-| `OAUTH_IDENTITY_CLAIMS` | `preferred_username,email,sub` | Claims tried in order for `human:<id>` binding |
-| `OAUTH_ALLOW_INSECURE_ISSUER` | `false` | Allow an `http://` issuer (development only) |
+| `AUTH_MODE` | `oidc` | Authentication mode: `oidc` or `none` |
+| `OAUTH_ISSUER` | required when `AUTH_MODE=oidc` | Must equal the token `iss` exactly (`oidc` mode only) |
+| `OAUTH_AUDIENCE` | `<PUBLIC_BASE_URL>/mcp` | Comma-separated accepted audiences (`oidc` mode only) |
+| `OAUTH_JWKS_URI` | discovered | Override the JWKS URL (`oidc` mode only) |
+| `OAUTH_SCOPE_READ` / `_WRITE` / `_ADMIN` | `okf:read` / `okf:write` / `okf:admin` | Scope names (granted to anonymous principal in `none` mode) |
+| `OAUTH_IDENTITY_CLAIMS` | `preferred_username,email,sub` | Claims tried in order for `human:<id>` binding (`oidc` mode only) |
+| `OAUTH_ALLOW_INSECURE_ISSUER` | `false` | Allow an `http://` issuer (development only, `oidc` mode only) |
 | `PORT` | `8080` | |
 | `HOST` | `0.0.0.0` | |
 | `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
@@ -431,6 +464,7 @@ For HTTPS, use `git.remote.auth=https` and a Secret with `username` and `passwor
 
 Other notable values:
 
+- `auth.mode`: `oidc` (default) or `none`. Use `none` for throwaway or local clusters where authentication is skipped; `oauth.issuer` is not required when `auth.mode=none`.
 - `persistence.*`
 - `ingress.*` / `httpRoute.*` (Gateway API)
 - `networkPolicy.*`

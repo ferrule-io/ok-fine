@@ -1,13 +1,23 @@
 ok-fine has been deployed.
+{{- if eq .Values.auth.mode "none" }}
+
+*********************************************************************************
+*** WARNING: Authentication is disabled (auth.mode=none).                     ***
+*** Anyone reaching the service has administrative access.                    ***
+*** Local testing only — never expose this service beyond localhost!          ***
+*********************************************************************************
+{{- end }}
 
 MCP endpoint:
   {{ include "ok-fine.publicBaseUrl" . }}/mcp
 
 REST API:
   {{ include "ok-fine.publicBaseUrl" . }}/api/v1
+{{- if eq .Values.auth.mode "oidc" }}
 
 OAuth metadata:
   {{ include "ok-fine.publicBaseUrl" . }}/.well-known/oauth-protected-resource/mcp
+{{- end }}
 
 To port-forward the service locally:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ok-fine.fullname" . }} 8080:{{ .Values.service.port }}

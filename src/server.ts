@@ -6,7 +6,7 @@ import {
   getOAuthProtectedResourceMetadataUrl,
   type OAuthMetadata,
 } from "@modelcontextprotocol/server";
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 import { type DiscoveredAuthorizationServer, discoverAuthorizationServer } from "./auth/discovery.js";
 import { createAuthenticator } from "./auth/http-auth.js";
@@ -22,6 +22,17 @@ import { Catalog } from "./store/catalog.js";
 import { GitBackend } from "./store/git-backend.js";
 
 type Permission = "read" | "write" | "admin";
+
+type AuthHandler =
+  | {
+      mode: "oidc";
+      authenticate(req: FastifyRequest): Promise<Response | null>;
+      insufficientScope(scopeName: string): Response;
+    }
+  | {
+      mode: "none";
+      authenticate(req: FastifyRequest): Promise<Response | null>;
+    };
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -60,47 +71,90 @@ export async function startServer(config: Config): Promise<RunningServer> {
     (_req, body, done) => done(null, body),
   );
 
-  let discovered: DiscoveredAuthorizationServer | undefined;
-  for (let attempt = 1; !discovered; attempt++) {
-    try {
-      discovered = await discoverAuthorizationServer(config.oauthIssuer, {
-        timeoutMs: 5000,
-        ...(config.oauthJwksUri === undefined ? {} : { jwksUri: config.oauthJwksUri }),
-      });
-    } catch (err) {
-      if (attempt >= DISCOVERY_ATTEMPTS) throw err;
-      app.log.warn({ err, attempt }, "authorization server discovery failed; retrying");
-      await sleep(DISCOVERY_RETRY_MS);
-    }
-  }
-  const { metadata, jwksUri } = discovered;
+  let authHandler: AuthHandler;
 
-  const resourceServerUrl = new URL(`${config.publicBaseUrl}/mcp`);
-  const prm = buildOAuthProtectedResourceMetadata({
-    // Discovery checked `issuer`; buildOAuthProtectedResourceMetadata validates the rest and throws on misconfiguration.
-    oauthMetadata: metadata as unknown as OAuthMetadata,
-    resourceServerUrl,
-    scopesSupported: [config.scopeNames.read, config.scopeNames.write, config.scopeNames.admin],
-    resourceName: "ok-fine",
-    dangerouslyAllowInsecureIssuerUrl: config.allowInsecureIssuer,
-  });
+  if (config.auth.mode === "oidc") {
+    let discovered: DiscoveredAuthorizationServer | undefined;
+    for (let attempt = 1; !discovered; attempt++) {
+      try {
+        discovered = await discoverAuthorizationServer(config.auth.issuer, {
+          timeoutMs: 5000,
+          ...(config.auth.jwksUri === undefined ? {} : { jwksUri: config.auth.jwksUri }),
+        });
+      } catch (err) {
+        if (attempt >= DISCOVERY_ATTEMPTS) throw err;
+        app.log.warn({ err, attempt }, "authorization server discovery failed; retrying");
+        await sleep(DISCOVERY_RETRY_MS);
+      }
+    }
+    const { metadata, jwksUri } = discovered;
+
+    const resourceServerUrl = new URL(`${config.publicBaseUrl}/mcp`);
+    const prm = buildOAuthProtectedResourceMetadata({
+      // Discovery checked `issuer`; buildOAuthProtectedResourceMetadata validates the rest and throws on misconfiguration.
+      oauthMetadata: metadata as unknown as OAuthMetadata,
+      resourceServerUrl,
+      scopesSupported: [config.scopeNames.read, config.scopeNames.write, config.scopeNames.admin],
+      resourceName: "ok-fine",
+      dangerouslyAllowInsecureIssuerUrl: config.auth.allowInsecureIssuer,
+    });
+
+    for (const path of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]) {
+      app.get(path, async (_req, reply) => reply.header("access-control-allow-origin", "*").send(prm));
+    }
+    app.get("/.well-known/oauth-authorization-server", async (_req, reply) =>
+      reply.header("access-control-allow-origin", "*").send(metadata),
+    );
+
+    const verifier = new JwtTokenVerifier({
+      issuer: config.auth.issuer,
+      audiences: config.auth.audiences,
+      jwksUri,
+      identityClaims: config.auth.identityClaims,
+    });
+    const authenticator = createAuthenticator({
+      verifier,
+      resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
+      scopeNames: config.scopeNames,
+    });
+
+    authHandler = {
+      mode: "oidc",
+      authenticate: async (req) => {
+        const result = await authenticator.authenticate(req.headers.authorization);
+        if (!result.ok) return result.response;
+        req.principal = result.principal;
+        req.authInfo = result.authInfo;
+        return null;
+      },
+      insufficientScope: (scopeName) => authenticator.insufficientScope(scopeName),
+    };
+  } else {
+    app.log.warn("authentication disabled, every request has admin access; never expose this beyond localhost");
+
+    const allScopes = [config.scopeNames.read, config.scopeNames.write, config.scopeNames.admin];
+    const anonymousAuthInfo: AuthInfo = {
+      token: "",
+      clientId: "anonymous",
+      scopes: allScopes,
+      extra: { sub: "anonymous", identity: null },
+    };
+    const anonymousPrincipal = principalFromAuthInfo(anonymousAuthInfo, config.scopeNames);
+
+    authHandler = {
+      mode: "none",
+      authenticate: async (req) => {
+        req.principal = anonymousPrincipal;
+        req.authInfo = anonymousAuthInfo;
+        return null;
+      },
+    };
+  }
 
   const storage = await GitBackend.open(config, app.log);
   const catalog = new Catalog();
   const service = new KnowledgeService({ config, storage, catalog, log: app.log });
   await service.initialize();
-
-  const verifier = new JwtTokenVerifier({
-    issuer: config.oauthIssuer,
-    audiences: config.oauthAudiences,
-    jwksUri,
-    identityClaims: config.identityClaims,
-  });
-  const authenticator = createAuthenticator({
-    verifier,
-    resourceMetadataUrl: getOAuthProtectedResourceMetadataUrl(resourceServerUrl),
-    scopeNames: config.scopeNames,
-  });
   const mcpHandler = createMcpHandler(
     ({ authInfo }) => {
       if (!authInfo) throw new Error("MCP request reached the handler without authInfo");
@@ -138,29 +192,19 @@ export async function startServer(config: Config): Promise<RunningServer> {
   });
 
   app.get("/healthz", async () => ({ status: "ok" }));
-  for (const path of ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"]) {
-    app.get(path, async (_req, reply) => reply.header("access-control-allow-origin", "*").send(prm));
-  }
-  app.get("/.well-known/oauth-authorization-server", async (_req, reply) =>
-    reply.header("access-control-allow-origin", "*").send(metadata),
-  );
 
   app.decorateRequest("principal", null);
   app.decorateRequest("authInfo", null);
   await app.register(async (secured) => {
     secured.addHook("preHandler", async (req, reply) => {
-      const result = await authenticator.authenticate(req.headers.authorization);
-      if (!result.ok) return reply.send(result.response);
-      req.principal = result.principal;
-      req.authInfo = result.authInfo;
-      const need = req.routeOptions.config.permission ?? "read";
-      const permitted =
-        need === "admin"
-          ? result.principal.canAdmin
-          : need === "write"
-            ? result.principal.canWrite
-            : result.principal.canRead;
-      if (!permitted) return reply.send(authenticator.insufficientScope(config.scopeNames[need]));
+      const challenge = await authHandler.authenticate(req);
+      if (challenge) return reply.send(challenge);
+      if (authHandler.mode === "oidc") {
+        const need = req.routeOptions.config.permission ?? "read";
+        const p = req.principal;
+        const permitted = p !== null && (need === "admin" ? p.canAdmin : need === "write" ? p.canWrite : p.canRead);
+        if (!permitted) return reply.send(authHandler.insufficientScope(config.scopeNames[need]));
+      }
     });
     registerMcpRoute(secured, (request, options) => mcpHandler.fetch(request, options), config.publicBaseUrl);
     registerRestRoutes(secured, service);

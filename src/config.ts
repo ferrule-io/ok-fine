@@ -7,22 +7,29 @@ export interface Logger {
   debug(objOrMsg: unknown, msg?: string): void;
 }
 
+export type AuthConfig =
+  | { mode: "none" }
+  | {
+      mode: "oidc";
+      issuer: string;
+      audiences: string[];
+      jwksUri?: string;
+      identityClaims: string[];
+      allowInsecureIssuer: boolean;
+    };
+
 export interface Config {
   port: number;
   host: string;
   logLevel: string;
   dataDir: string;
   publicBaseUrl: string;
-  oauthIssuer: string;
-  oauthAudiences: string[];
-  oauthJwksUri?: string;
+  auth: AuthConfig;
   scopeNames: {
     read: string;
     write: string;
     admin: string;
   };
-  identityClaims: string[];
-  allowInsecureIssuer: boolean;
   gitBranch: string;
   gitRemoteUrl?: string;
   gitSyncIntervalSeconds: number;
@@ -55,6 +62,7 @@ function httpUrl(value: string): boolean {
 
 const rawEnvSchema = z
   .object({
+    AUTH_MODE: z.enum(["oidc", "none"], "AUTH_MODE must be oidc or none").default("oidc"),
     PORT: intEnv("PORT", "8080", 0, 65535),
     HOST: z.string().default("0.0.0.0"),
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
@@ -65,9 +73,9 @@ const rawEnvSchema = z
     PUBLIC_BASE_URL: z
       .string({ message: "PUBLIC_BASE_URL is required" })
       .refine(httpUrl, "PUBLIC_BASE_URL must be a valid http or https URL"),
-    OAUTH_ISSUER: z.string({ message: "OAUTH_ISSUER is required" }).refine(httpUrl, "OAUTH_ISSUER must be a valid URL"),
+    OAUTH_ISSUER: z.string().optional(),
     OAUTH_AUDIENCE: z.string().optional(),
-    OAUTH_JWKS_URI: z.string().refine(httpUrl, "OAUTH_JWKS_URI must be a valid URL").optional(),
+    OAUTH_JWKS_URI: z.string().optional(),
     OAUTH_SCOPE_READ: z.string().default("okf:read"),
     OAUTH_SCOPE_WRITE: z.string().default("okf:write"),
     OAUTH_SCOPE_ADMIN: z.string().default("okf:admin"),
@@ -85,15 +93,41 @@ const rawEnvSchema = z
     MAX_FILE_BYTES: intEnv("MAX_FILE_BYTES", "1048576", 1),
     MAX_ARCHIVE_BYTES: intEnv("MAX_ARCHIVE_BYTES", "52428800", 1),
   })
-  .superRefine((data, ctx) => {
-    if (Boolean(data.GIT_HTTP_USERNAME) !== Boolean(data.GIT_HTTP_PASSWORD)) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["GIT_HTTP_USERNAME"],
-        message: "GIT_HTTP_USERNAME and GIT_HTTP_PASSWORD must be provided together or neither",
-      });
-    }
-  });
+  .superRefine(
+    (data, ctx) => {
+      if (!data || typeof data !== "object") return;
+      if (Boolean(data.GIT_HTTP_USERNAME) !== Boolean(data.GIT_HTTP_PASSWORD)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["GIT_HTTP_USERNAME"],
+          message: "GIT_HTTP_USERNAME and GIT_HTTP_PASSWORD must be provided together or neither",
+        });
+      }
+      if (data.AUTH_MODE === "oidc") {
+        if (data.OAUTH_ISSUER === undefined) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["OAUTH_ISSUER"],
+            message: "OAUTH_ISSUER is required",
+          });
+        } else if (!httpUrl(data.OAUTH_ISSUER)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["OAUTH_ISSUER"],
+            message: "OAUTH_ISSUER must be a valid URL",
+          });
+        }
+        if (data.OAUTH_JWKS_URI !== undefined && !httpUrl(data.OAUTH_JWKS_URI)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["OAUTH_JWKS_URI"],
+            message: "OAUTH_JWKS_URI must be a valid URL",
+          });
+        }
+      }
+    },
+    { when: () => true },
+  );
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const result = rawEnvSchema.safeParse(env);
@@ -105,20 +139,37 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const raw = result.data;
   const publicBaseUrl = raw.PUBLIC_BASE_URL.replace(/\/+$/, "");
 
-  let oauthAudiences: string[];
-  if (raw.OAUTH_AUDIENCE && raw.OAUTH_AUDIENCE.trim().length > 0) {
-    oauthAudiences = raw.OAUTH_AUDIENCE.split(",")
+  let auth: AuthConfig;
+  if (raw.AUTH_MODE === "none") {
+    auth = { mode: "none" };
+  } else {
+    if (raw.OAUTH_ISSUER === undefined) {
+      throw new Error("OAUTH_ISSUER is required when AUTH_MODE is oidc");
+    }
+    let oauthAudiences: string[];
+    if (raw.OAUTH_AUDIENCE && raw.OAUTH_AUDIENCE.trim().length > 0) {
+      oauthAudiences = raw.OAUTH_AUDIENCE.split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+    } else {
+      oauthAudiences = [`${publicBaseUrl}/mcp`];
+    }
+
+    const identityClaims = raw.OAUTH_IDENTITY_CLAIMS.split(",")
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
-  } else {
-    oauthAudiences = [`${publicBaseUrl}/mcp`];
+
+    const allowInsecureIssuer = raw.OAUTH_ALLOW_INSECURE_ISSUER === "true";
+
+    auth = {
+      mode: "oidc",
+      issuer: raw.OAUTH_ISSUER,
+      audiences: oauthAudiences,
+      ...(raw.OAUTH_JWKS_URI === undefined ? {} : { jwksUri: raw.OAUTH_JWKS_URI }),
+      identityClaims,
+      allowInsecureIssuer,
+    };
   }
-
-  const identityClaims = raw.OAUTH_IDENTITY_CLAIMS.split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-
-  const allowInsecureIssuer = raw.OAUTH_ALLOW_INSECURE_ISSUER === "true";
 
   return {
     port: raw.PORT,
@@ -126,16 +177,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     logLevel: raw.LOG_LEVEL,
     dataDir: raw.DATA_DIR,
     publicBaseUrl,
-    oauthIssuer: raw.OAUTH_ISSUER,
-    oauthAudiences,
-    oauthJwksUri: raw.OAUTH_JWKS_URI,
+    auth,
     scopeNames: {
       read: raw.OAUTH_SCOPE_READ,
       write: raw.OAUTH_SCOPE_WRITE,
       admin: raw.OAUTH_SCOPE_ADMIN,
     },
-    identityClaims,
-    allowInsecureIssuer,
     gitBranch: raw.GIT_BRANCH,
     gitRemoteUrl: raw.GIT_REMOTE_URL,
     gitSyncIntervalSeconds: raw.GIT_SYNC_INTERVAL_SECONDS,
