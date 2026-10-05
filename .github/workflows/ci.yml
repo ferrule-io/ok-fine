@@ -50,6 +50,27 @@ jobs:
       - name: Run typecheck
         run: pnpm typecheck
 
+      - name: Validate agent package
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const root = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
+            const files = [
+              "agents/package.json", "agents/plugin.json", "agents/gemini-extension.json",
+              "agents/.claude-plugin/plugin.json", "agents/.claude-plugin/marketplace.json",
+              "agents/.agents/plugins/marketplace.json", "agents/hooks/hooks.json",
+            ];
+            const versioned = new Set(files.slice(0, 4));
+            for (const f of files) {
+              const json = JSON.parse(fs.readFileSync(f, "utf8"));
+              if (versioned.has(f) && json.version !== root) {
+                console.error(`${f}: version ${json.version} != package.json ${root}`);
+                process.exit(1);
+              }
+            }
+          '
+          sh -n agents/hooks/session-start.sh
+
       - name: Run tests
         run: pnpm test
 

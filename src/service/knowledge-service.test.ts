@@ -110,6 +110,32 @@ describe("KnowledgeService", () => {
     expect(execSync("git rev-list --count HEAD", { cwd: join(dataDir, "repo") }).toString().trim()).toBe("1");
   });
 
+  it("listProjects returns bound repositories and filters by normalized git remote", async () => {
+    const { service } = await setupService();
+    await service.createProject(alice, { project: "alpha", title: "Alpha", actor: "test/1.0" });
+    await service.createProject(alice, { project: "beta", title: "Beta", actor: "test/1.0" });
+    await service.writeConcept(alice, {
+      project: "alpha",
+      id: "overview",
+      frontmatter: { type: "Project", title: "Alpha", repositories: ["git@github.com:Acme/Shop.git"] },
+      body: "# Alpha\n",
+      actor: "test/1.0",
+    });
+
+    const filtered = service.listProjects({ repository: "https://github.com/acme/shop" });
+    expect(filtered.projects.map((p) => [p.project, p.repositories])).toEqual([["alpha", ["github.com/acme/shop"]]]);
+
+    const all = service.listProjects();
+    expect(Object.fromEntries(all.projects.map((p) => [p.project, p.repositories]))).toEqual({
+      alpha: ["github.com/acme/shop"],
+      beta: [],
+    });
+
+    expect(() => service.listProjects({ repository: "/tmp/shop" })).toThrowError(
+      expect.objectContaining({ code: "bad_request", status: 400 }),
+    );
+  });
+
   it("create project + write concept records correctly in catalog, index.md, log.md, and git", async () => {
     const { service, dataDir } = await setupService();
 

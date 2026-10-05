@@ -16,6 +16,7 @@ from your own identity provider.
 - [How it works](#how-it-works)
 - [Quick start (local)](#quick-start-local)
 - [Connecting an MCP client](#connecting-an-mcp-client)
+- [Using ok-fine from coding agents](#using-ok-fine-from-coding-agents)
 - [MCP tools](#mcp-tools)
 - [REST API](#rest-api)
 - [Authentication and authorization](#authentication-and-authorization)
@@ -168,9 +169,81 @@ Clients that take a static header can pass `Authorization: Bearer <token>` direc
 }
 ```
 
-The server sends usage instructions to the client on connect. In short: discover with `list_projects` and
-`get_index`, read with `read_concept`, write with `write_concept` passing `expectedRevision`, and prefer
-`status: deprecated` over deleting.
+The server sends usage instructions to the client on connect. In short: resolve the current repository's project
+with `list_projects` and `repository`, discover with `get_index`, read with `read_concept`, write with
+`write_concept` passing `expectedRevision`, and prefer `status: deprecated` over deleting.
+
+## Using ok-fine from coding agents
+
+ok-fine works with Claude Code, OpenAI Codex CLI, Gemini CLI, pi, and oh-my-pi (omp) on existing codebases
+without changing a single file in them. There is no `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.mcp.json`, or
+settings file to commit: knowledge and the repository-to-project binding both live in ok-fine. Each developer
+installs one agent package and configures the ok-fine MCP server once per harness.
+
+The agent package is built from [`agents/`](agents/) and published to
+[`ferrule-io/ok-fine-agents`](https://github.com/ferrule-io/ok-fine-agents) on every release. It contains:
+
+- three [Agent Skills](https://agentskills.io): `ok-fine` (find the project, recall before work, record after),
+  `ok-fine-onboard` (bind a repository and bootstrap knowledge), and `ok-fine-review` (lint, staleness, drift,
+  verification);
+- a SessionStart hook (Claude Code, Codex, Gemini CLI) and a pi/omp extension that tell the agent which git remote
+  the session is in. They run locally and never call ok-fine.
+
+### Lifecycle
+
+| Stage | Who / when | Mechanism |
+|---|---|---|
+| 1. Org setup | Once per org | Deploy ok-fine and configure the identity provider (below). |
+| 2. Developer setup | Once per developer per harness | Install the package, add a user-scope MCP server named `ok-fine`, and log in with the harness's OAuth flow. |
+| 3. Repository onboarding | Once per codebase, by anyone with `okf:write` | Ask the agent to "onboard this repository to ok-fine". The `ok-fine-onboard` skill creates or picks the project, adds the git remote to the overview's `repositories`, and bootstraps up to 30 concepts. The codebase is untouched. |
+| 4. Every session | Automatic | The hook/extension tells the agent the repository URL; server instructions and the `ok-fine` skill drive `list_projects(repository=…)`, recall (overview, index, search) before work, and capture of durable knowledge after. |
+| 5. Maintenance | On demand | Ask the agent to "review ok-fine knowledge". The `ok-fine-review` skill runs lint, finds stale, unverified, and drifted concepts (sources carry `commit`), updates or deprecates them, and records human verification only on explicit confirmation. |
+
+### Repository binding
+
+A project is bound to codebases through the `repositories` list in its `overview` frontmatter:
+
+```yaml
+type: Project
+title: Shop
+repositories:
+  - git@github.com:acme/shop.git
+```
+
+`list_projects` (and `GET /api/v1/projects?repository=`) normalizes remotes before comparing: scheme, userinfo,
+port, and a trailing `.git` are dropped and the result is lowercased, so `git@github.com:Acme/Shop.git`,
+`https://github.com/acme/shop`, and `ssh://git@github.com:22/acme/shop` all match `github.com/acme/shop`. Local
+paths are rejected with `bad_request`. One repository may be bound to several projects (and one project to
+several repositories) for monorepo splits and multi-repo products.
+
+### Identity provider requirements
+
+- Audience `<PUBLIC_BASE_URL>/mcp`, scopes `okf:read okf:write okf:admin`, JWT access tokens.
+- The `iss` parameter in authorization responses (RFC 9207); Gemini CLI rejects responses without it.
+- Dynamic client registration or client ID metadata documents, or one public client with loopback redirect URIs
+  that developers pass as the client ID below.
+
+### Per-harness setup
+
+Replace `https://okf.example.com` with your `PUBLIC_BASE_URL`.
+
+| Harness | Install package | Add server | Log in |
+|---|---|---|---|
+| Claude Code | `claude plugin marketplace add ferrule-io/ok-fine-agents` then `claude plugin install ok-fine@ok-fine` | `claude mcp add --transport http --scope user ok-fine https://okf.example.com/mcp` (pre-registered client: add `--client-id <id> --callback-port <port>`) | `/mcp` |
+| Codex CLI | `codex plugin marketplace add ferrule-io/ok-fine-agents`, install `ok-fine` from `/plugins`, trust its hook in `/hooks` | `codex mcp add ok-fine --url https://okf.example.com/mcp` (pre-registered: `--oauth-client-id <id>`) | `codex mcp login ok-fine` |
+| Gemini CLI | `gemini extensions install https://github.com/ferrule-io/ok-fine-agents --auto-update` | `gemini mcp add -s user -t http ok-fine https://okf.example.com/mcp` (pre-registered: `oauth.clientId` in `~/.gemini/settings.json`) | `/mcp auth ok-fine` |
+| pi | `pi install git:github.com/ferrule-io/ok-fine-agents` | `~/.pi/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"url":"https://okf.example.com/mcp","exposure":"direct"}}}` (pre-registered: `oauth.clientId`/`callbackPort`) | `pi mcp login ok-fine` |
+| omp | `omp plugin marketplace add ferrule-io/ok-fine-agents` then `omp plugin install ok-fine@ok-fine` | `~/.omp/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"type":"http","url":"https://okf.example.com/mcp"}}}` | `/mcp reauth ok-fine` |
+
+Headless use without OAuth: mint a token and pass it as a static header — Claude Code
+`--header "Authorization: Bearer ${OKF_TOKEN}"`, Codex `--bearer-token-env-var OKF_TOKEN`, pi/omp
+`"headers": {"Authorization": "Bearer ${OKF_TOKEN}"}`.
+
+### Daily use
+
+Say "onboard this repository to ok-fine" once per codebase, then work normally: the agent recalls relevant
+knowledge before non-trivial tasks and records durable decisions, conventions, and runbooks afterwards. Say
+"review ok-fine knowledge" to audit and refresh it. Nothing is ever written into the codebase.
 
 ## MCP tools
 
@@ -178,7 +251,7 @@ A client only sees the tools its token's scopes allow.
 
 | Tool | Scope | Purpose |
 |---|---|---|
-| `list_projects` | read | All projects with concept and stale counts |
+| `list_projects` | read | Projects with counts and bound git repositories; `repository` filters to one codebase |
 | `get_index` | read | Directory listing: concepts by type, files, subdirectories |
 | `read_concept` | read | Frontmatter, body, derived trust/staleness, links, lint issues, `revision` |
 | `search_concepts` | read | Keyword search with filters (`project`, `type`, `tags`, `status`, `trustTier`, `stale`) |
@@ -214,7 +287,7 @@ updates or `If-None-Match: *` for create-only PUTs of concepts and files (other 
 
 | Method | Path | Scope | Notes |
 |---|---|---|---|
-| GET | `/projects` | read | |
+| GET | `/projects` | read | `?repository=<git remote URL>` |
 | POST | `/projects` | write | `{ project, title, description? }` → 201 |
 | GET | `/projects/:project` | read | summary with type and trust tier counts |
 | DELETE | `/projects/:project` | admin | |
@@ -389,13 +462,15 @@ Layout:
 | `src/server.ts` | Wiring (used by `main.ts` and the end-to-end test) |
 | `src/dev/` | Development token issuer |
 | `charts/ok-fine/` | Helm chart |
+| `agents/` | Agent package (skills, SessionStart hook, pi/omp extension, harness manifests); mirrored to `ferrule-io/ok-fine-agents` |
 
 ## CI and releases
 
 - **Push to `development`** runs `.github/workflows/ci.yml`: `pnpm typecheck`, `pnpm test`, `pnpm build`, `helm lint --strict`, and Docker builds for `amd64` and `arm64` on native runners.
-- **Push to `main`** runs `.github/workflows/release.yml`: runs CI, then the release job computes next version (minor+1 over max of `Chart.yaml` version and latest `vX.Y.Z` tag), commits `chore(release): vX.Y.Z` to `main` bumping `charts/ok-fine/Chart.yaml` (version + appVersion), `package.json`, and `src/version.ts`, tags it, builds the per-arch images natively and merges them into a multi-arch manifest (tags `X.Y.Z`, `sha-<short>`, and `latest` only when it is the highest release), pushes the chart to `oci://ghcr.io/ferrule-io/charts`, then merges the release commit back into `development` (fails rather than force-pushing on conflict). Reruns reuse the existing release commit/tag.
+- **Push to `main`** runs `.github/workflows/release.yml`: runs CI, then the release job computes next version (minor+1 over max of `Chart.yaml` version and latest `vX.Y.Z` tag), commits `chore(release): vX.Y.Z` to `main` bumping `charts/ok-fine/Chart.yaml` (version + appVersion), `package.json`, `src/version.ts`, and the agent manifests (`agents/package.json`, `agents/plugin.json`, `agents/gemini-extension.json`, `agents/.claude-plugin/plugin.json`), tags it, builds the per-arch images natively and merges them into a multi-arch manifest (tags `X.Y.Z`, `sha-<short>`, and `latest` only when it is the highest release), pushes the chart to `oci://ghcr.io/ferrule-io/charts`, then merges the release commit back into `development` (fails rather than force-pushing on conflict). Reruns reuse the existing release commit/tag.
+- **Agent package:** the `agents` job replaces the contents of `ferrule-io/ok-fine-agents` with `agents/` plus `LICENSE`, commits, tags `vX.Y.Z`, and pushes (to `main` only when it is the highest release). The mirror is generated output; edit `agents/` here. Reruns skip an existing tag.
 - **One release per run of pushes:** releases are serialized (`concurrency: release`). A push that lands while a release is running supersedes older queued pushes, and a run whose commit is no longer `main`'s head fails with `main moved past <sha>`; the newest push releases everything since the last tag, with a single minor bump.
-- **Prerequisites:** if `main`/`development` have branch protection or rulesets, allow GitHub Actions to push to them; make the GHCR `ok-fine` and `charts/ok-fine` packages public after the first release.
+- **Prerequisites:** if `main`/`development` have branch protection or rulesets, allow GitHub Actions to push to them; make the GHCR `ok-fine` and `charts/ok-fine` packages public after the first release. For the agent package, create the public repository `ferrule-io/ok-fine-agents` with an initial commit on `main`, add a deploy key with write access there, and store its private key as the `AGENTS_DEPLOY_KEY` secret in this repository; until then only the `agents` job fails.
 - **Caching:** buildx GHA cache per arch shared by CI and release (`main` reads caches from the default branch `development`), mise toolchain cache, and pnpm store cache keyed on `pnpm-lock.yaml`.
 
 ## License

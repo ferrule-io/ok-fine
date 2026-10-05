@@ -7,7 +7,7 @@ Guidance for coding agents working on this repository. User-facing documentation
 ```sh
 mise install            # Node 24, pnpm 11
 pnpm install
-pnpm typecheck          # tsc --noEmit over src/, test/, vitest.config.ts
+pnpm typecheck          # tsc --noEmit over src/, test/, agents/, vitest.config.ts
 pnpm test               # vitest: unit, service (real git), end-to-end
 pnpm build              # emits dist/
 pnpm exec vitest run src/service   # one suite
@@ -29,6 +29,7 @@ Dependencies point downward only:
 | Wiring | `src/server.ts` | `startServer(config)`. Shared by `src/main.ts` and `test/e2e.test.ts`; keep all wiring here. |
 | Auth | `src/auth/` | JWT resource server. ok-fine never issues tokens. |
 | Dev only | `src/dev/` | Unauthenticated token issuer for tests and local runs. Never wire it into the server. |
+| Agent package | `agents/` | Skills, SessionStart hook, pi/omp extension, harness manifests. Never imports from `src/`; mirrored to `ferrule-io/ok-fine-agents` on release, so edit here only. |
 
 ## Invariants
 
@@ -59,6 +60,8 @@ Break any of these and you have a bug.
   Transports map them; don't invent per-transport error shapes.
 - **Single replica:** the design assumes one process per data volume (RWO PVC, in-process mutex). Don't add
   horizontal scaling without replacing the locking model.
+- **Agent-facing text:** tool names and parameters referenced in `agents/` and `INSTRUCTIONS` (`src/mcp/server.ts`)
+  must match the registered tools. Agent-facing text must never instruct writing files into a consumer codebase.
 
 ## Code conventions
 
@@ -85,5 +88,5 @@ Break any of these and you have a bug.
 - For Kubernetes testing, use a local cluster (e.g. `minikube -p ok-fine`) and pin `--context`/`--kube-context` on
   every command. Never assume the current context is safe.
 - CI/release workflows live in `.github/workflows/` (`ci.yml` reusable via `workflow_call`; `release.yml` on `main`).
-- Versions in `charts/ok-fine/Chart.yaml` (version + appVersion), `package.json`, and `src/version.ts` are bumped by the release workflow — don't hand-edit them.
+- Versions in `charts/ok-fine/Chart.yaml` (version + appVersion), `package.json`, `src/version.ts`, and the agent manifests (`agents/package.json`, `agents/plugin.json`, `agents/gemini-extension.json`, `agents/.claude-plugin/plugin.json`) are bumped by the release workflow — don't hand-edit them.
 - Keep the buildx cache scopes (`image-amd64`, `image-arm64`) identical in both workflows.

@@ -50,6 +50,7 @@ import {
   prependLogEntry,
 } from "../okf/log-file.js";
 import { type LintIssue, lintConceptFile } from "../okf/lint.js";
+import { normalizeRepository } from "../okf/repository.js";
 import { renderIndex } from "../okf/index-file.js";
 
 export interface ProjectSummary {
@@ -59,6 +60,8 @@ export interface ProjectSummary {
   conceptCount: number;
   staleCount: number;
   updatedAt: string | null;
+  /** Normalized git remotes (`host/path`) from the overview's `repositories` frontmatter. */
+  repositories: string[];
 }
 
 export interface ProjectDetails extends ProjectSummary {
@@ -229,7 +232,31 @@ export class KnowledgeService {
     return tree;
   }
 
-  listProjects(): { projects: ProjectSummary[] } {
+  /** Normalized, deduplicated `repositories` from the project's overview frontmatter, in first-seen order. */
+  private repositoriesOf(project: string): string[] {
+    const raw = this.catalog.get(project, "overview")?.frontmatter?.repositories;
+    const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+    const out: string[] = [];
+    for (const value of values) {
+      if (typeof value !== "string") continue;
+      const normalized = normalizeRepository(value);
+      if (normalized !== null && !out.includes(normalized)) out.push(normalized);
+    }
+    return out;
+  }
+
+  listProjects(filter: { repository?: string } = {}): { projects: ProjectSummary[] } {
+    let wanted: string | null = null;
+    if (filter.repository !== undefined) {
+      wanted = normalizeRepository(filter.repository);
+      if (wanted === null) {
+        throw new OkfError(
+          "bad_request",
+          400,
+          "repository must be a git remote URL such as git@github.com:org/repo.git or https://github.com/org/repo",
+        );
+      }
+    }
     const projects = this.catalog.projects();
     const now = new Date();
     const summaries: ProjectSummary[] = [];
@@ -252,6 +279,9 @@ export class KnowledgeService {
         }
       }
 
+      const repositories = this.repositoriesOf(project);
+      if (wanted !== null && !repositories.includes(wanted)) continue;
+
       summaries.push({
         project,
         title: overview?.title ?? project,
@@ -259,6 +289,7 @@ export class KnowledgeService {
         conceptCount: records.length,
         staleCount,
         updatedAt: latestUpdatedAt,
+        repositories,
       });
     }
 
@@ -302,6 +333,7 @@ export class KnowledgeService {
       conceptCount: records.length,
       staleCount,
       updatedAt: latestUpdatedAt,
+      repositories: this.repositoriesOf(project),
       typeCounts,
       trustTierCounts,
     };
