@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - development
+  pull_request:
+    branches:
+      - development
+      - main
   workflow_call:
 
 permissions:
@@ -90,4 +94,5 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: false
           cache-from: type=gha,scope=image-${{ matrix.arch }}
-          cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max
+          # PR caches are only readable from that PR's ref; don't let them evict the shared warm cache.
+          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,scope=image-{0},mode=max', matrix.arch) || '' }}
