@@ -71,6 +71,7 @@ jobs:
 
   image:
     name: Build image (${{ matrix.arch }})
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -94,5 +95,4 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: false
           cache-from: type=gha,scope=image-${{ matrix.arch }}
-          # PR caches are only readable from that PR's ref; don't let them evict the shared warm cache.
-          cache-to: ${{ github.event_name != 'pull_request' && format('type=gha,scope=image-{0},mode=max', matrix.arch) || '' }}
+          cache-to: type=gha,scope=image-${{ matrix.arch }},mode=max
