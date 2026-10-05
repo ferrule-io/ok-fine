@@ -118,7 +118,7 @@ export class BundleTree {
   }
 
   /** Direct-child basenames of `dir` ("" = root). */
-  entries(dir: string): Readonly<DirEntries> {
+  entries(dir: string): { readonly files: readonly string[]; readonly dirs: readonly string[] } {
     return this.dirEntries.get(dir) ?? NO_ENTRIES;
   }
 
