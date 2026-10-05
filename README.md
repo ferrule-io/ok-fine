@@ -106,7 +106,7 @@ Requires Docker, plus `curl` for the examples.
 docker run --rm -p 127.0.0.1:8080:8080 -e AUTH_MODE=none -e PUBLIC_BASE_URL=http://localhost:8080 -v okf-data:/data ghcr.io/ferrule-io/ok-fine:latest
 ```
 
-Or with Docker Compose using the repository's `docker-compose.yaml`:
+Or, from a checkout, with Docker Compose (pulls the published image, or builds it from source when the pull fails):
 
 ```sh
 docker compose up -d

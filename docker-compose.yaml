@@ -4,6 +4,8 @@
 services:
   ok-fine:
     image: ghcr.io/ferrule-io/ok-fine:latest
+    # Builds from this checkout when the image is not available locally.
+    build: .
     restart: unless-stopped
     ports:
       - "127.0.0.1:8080:8080"
