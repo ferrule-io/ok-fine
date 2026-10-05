@@ -80,9 +80,7 @@ const rawEnvSchema = z
     OAUTH_SCOPE_WRITE: z.string().default("okf:write"),
     OAUTH_SCOPE_ADMIN: z.string().default("okf:admin"),
     OAUTH_IDENTITY_CLAIMS: z.string().default("preferred_username,email,sub"),
-    OAUTH_ALLOW_INSECURE_ISSUER: z
-      .enum(["true", "false"], "OAUTH_ALLOW_INSECURE_ISSUER must be true or false")
-      .default("false"),
+    OAUTH_ALLOW_INSECURE_ISSUER: z.string().optional(),
     GIT_BRANCH: z.string().default("main"),
     GIT_REMOTE_URL: z.string().optional(),
     GIT_SYNC_INTERVAL_SECONDS: intEnv("GIT_SYNC_INTERVAL_SECONDS", "60", 0),
@@ -122,6 +120,17 @@ const rawEnvSchema = z
             code: "custom",
             path: ["OAUTH_JWKS_URI"],
             message: "OAUTH_JWKS_URI must be a valid URL",
+          });
+        }
+        if (
+          data.OAUTH_ALLOW_INSECURE_ISSUER !== undefined &&
+          data.OAUTH_ALLOW_INSECURE_ISSUER !== "true" &&
+          data.OAUTH_ALLOW_INSECURE_ISSUER !== "false"
+        ) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["OAUTH_ALLOW_INSECURE_ISSUER"],
+            message: "OAUTH_ALLOW_INSECURE_ISSUER must be true or false",
           });
         }
       }

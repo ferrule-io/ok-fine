@@ -98,22 +98,18 @@ commit trailer.
 
 ## Quick start (local)
 
-Requires Node 24 and pnpm 11 (`mise install` sets both up), plus `git` and `curl` for the examples.
+Requires Docker, plus `curl` for the examples.
 
 > **Warning:** `AUTH_MODE=none` disables authentication completely and gives every caller full admin access. Never expose it beyond localhost.
 
 ```sh
-pnpm install
-pnpm build
-
-HOST=127.0.0.1 PUBLIC_BASE_URL=http://localhost:8080 AUTH_MODE=none DATA_DIR=$(mktemp -d) node dist/main.js
+docker run --rm -p 127.0.0.1:8080:8080 -e AUTH_MODE=none -e PUBLIC_BASE_URL=http://localhost:8080 -v okf-data:/data ghcr.io/ferrule-io/ok-fine:latest
 ```
 
-Or run with Docker (the image runs as user `node` with `/data` as the default `DATA_DIR`):
+Or with Docker Compose using the repository's `docker-compose.yaml`:
 
 ```sh
-docker build -t ok-fine .
-docker run --rm -p 127.0.0.1:8080:8080 -e AUTH_MODE=none -e PUBLIC_BASE_URL=http://localhost:8080 -v okf-data:/data ok-fine
+docker compose up -d
 ```
 
 Create a project, write a concept, and search:

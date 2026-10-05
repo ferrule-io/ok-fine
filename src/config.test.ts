@@ -28,6 +28,17 @@ describe("loadConfig", () => {
     expect(config.auth).toEqual({ mode: "none" });
   });
 
+  it("ignores malformed OIDC variables when AUTH_MODE=none", () => {
+    const config = loadConfig({
+      PUBLIC_BASE_URL: "https://okf.example.com",
+      AUTH_MODE: "none",
+      OAUTH_ALLOW_INSECURE_ISSUER: "yes",
+      OAUTH_JWKS_URI: "not a url",
+      OAUTH_ISSUER: "not a url",
+    });
+    expect(config.auth).toEqual({ mode: "none" });
+  });
+
   it("rejects invalid AUTH_MODE with the message", () => {
     expect(() => loadConfig({ ...required, AUTH_MODE: "invalid" })).toThrow("AUTH_MODE must be oidc or none");
   });
