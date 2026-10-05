@@ -1,10 +1,5 @@
-import {
-  OAuthError,
-  OAuthErrorCode,
-  type OAuthTokenVerifier,
-  type AuthInfo,
-} from "@modelcontextprotocol/server";
-import { createRemoteJWKSet, jwtVerify, errors, type JWTVerifyGetKey, type JWTVerifyResult } from "jose";
+import { type AuthInfo, OAuthError, OAuthErrorCode, type OAuthTokenVerifier } from "@modelcontextprotocol/server";
+import { createRemoteJWKSet, errors, type JWTVerifyGetKey, type JWTVerifyResult, jwtVerify } from "jose";
 import type { Principal } from "../service/principal.js";
 
 export interface JwtTokenVerifierOptions {

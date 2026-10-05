@@ -1,25 +1,12 @@
-import { describe, it, expect } from "vitest";
-import {
-  splitFrontmatter,
-  parseFrontmatter,
-  applyFrontmatter,
-  serializeConcept,
-} from "./frontmatter.js";
-import {
-  trustTier,
-  effectiveStatus,
-  isStale,
-  parseActor,
-} from "./semantics.js";
-import {
-  normalizeConceptIdForWrite,
-  resolveReadPath,
-} from "./paths.js";
-import { extractLinks } from "./markdown.js";
-import { renderIndex, type DirListing } from "./index-file.js";
-import { prependLogEntry } from "./log-file.js";
+import { describe, expect, it } from "vitest";
+import { applyFrontmatter, parseFrontmatter, serializeConcept, splitFrontmatter } from "./frontmatter.js";
+import { type DirListing, renderIndex } from "./index-file.js";
 import { lintConceptFile, lintLogFile } from "./lint.js";
+import { prependLogEntry } from "./log-file.js";
+import { extractLinks } from "./markdown.js";
+import { normalizeConceptIdForWrite, resolveReadPath } from "./paths.js";
 import { normalizeRepository } from "./repository.js";
+import { effectiveStatus, isStale, parseActor, trustTier } from "./semantics.js";
 
 describe("OKF Core", () => {
   it("frontmatter round-trip keeps comments, unknown keys, flow generated, and string timestamps", () => {

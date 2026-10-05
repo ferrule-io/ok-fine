@@ -1,17 +1,17 @@
-import { splitFrontmatter, parseFrontmatter } from "./frontmatter.js";
+import { parseFrontmatter, splitFrontmatter } from "./frontmatter.js";
+import { extractLinks } from "./markdown.js";
+import { blobRevision } from "./paths.js";
 import {
-  type Status,
-  type TrustTier,
   displayTitle,
   effectiveStatus,
-  trustTier,
-  staleAfter,
   generatedAt,
   generatedBy,
   lastVerifiedAt,
+  type Status,
+  staleAfter,
+  type TrustTier,
+  trustTier,
 } from "./semantics.js";
-import { blobRevision } from "./paths.js";
-import { extractLinks } from "./markdown.js";
 
 export interface ConceptRecord {
   project: string;
@@ -110,9 +110,7 @@ export function parseConcept(project: string, id: string, file: string, buf: Buf
     };
   }
 
-  const tags = Array.isArray(data.tags)
-    ? data.tags.filter((t): t is string => typeof t === "string")
-    : [];
+  const tags = Array.isArray(data.tags) ? data.tags.filter((t): t is string => typeof t === "string") : [];
 
   return {
     project,

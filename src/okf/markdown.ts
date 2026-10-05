@@ -1,5 +1,5 @@
-import { marked } from "marked";
 import { posix } from "node:path";
+import { marked } from "marked";
 import { isReservedName } from "./paths.js";
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;

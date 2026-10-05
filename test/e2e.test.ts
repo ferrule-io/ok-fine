@@ -7,8 +7,8 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import * as tar from "tar";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.js";
-import { startDevIssuer, type DevIssuer } from "../src/dev/issuer.js";
-import { startServer, type RunningServer } from "../src/server.js";
+import { type DevIssuer, startDevIssuer } from "../src/dev/issuer.js";
+import { type RunningServer, startServer } from "../src/server.js";
 
 const PUBLIC = "http://okf.test";
 
@@ -86,7 +86,15 @@ describe("ok-fine end to end", () => {
     const client = await connect(await issuer.mintToken({ scope: "okf:read" }));
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual(
-      ["get_history", "get_index", "lint_project", "list_projects", "read_concept", "read_file", "search_concepts"].sort(),
+      [
+        "get_history",
+        "get_index",
+        "lint_project",
+        "list_projects",
+        "read_concept",
+        "read_file",
+        "search_concepts",
+      ].sort(),
     );
     await client.close();
   });

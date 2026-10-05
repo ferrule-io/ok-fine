@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { generateKeyPair, exportJWK, SignJWT } from "jose";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
 
 export interface DevIssuerOptions {
   port?: number;
@@ -91,8 +91,7 @@ export async function startDevIssuer(options?: DevIssuerOptions): Promise<DevIss
 
     if (
       req.method === "GET" &&
-      (pathname === "/.well-known/oauth-authorization-server" ||
-        pathname === "/.well-known/openid-configuration")
+      (pathname === "/.well-known/oauth-authorization-server" || pathname === "/.well-known/openid-configuration")
     ) {
       const metadata = {
         issuer: resolvedIssuerUrl,
@@ -169,7 +168,7 @@ export async function startDevIssuer(options?: DevIssuerOptions): Promise<DevIss
           token_type: "Bearer",
           expires_in: 3600,
           scope,
-        })
+        }),
       );
       return;
     }

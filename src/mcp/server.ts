@@ -1,9 +1,9 @@
-import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
+import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
-import { OkfError } from "../errors.js";
 import type { Logger } from "../config.js";
-import type { Principal } from "../service/principal.js";
+import { OkfError } from "../errors.js";
 import type { KnowledgeService } from "../service/knowledge-service.js";
+import type { Principal } from "../service/principal.js";
 import { VERSION } from "../version.js";
 
 export const INSTRUCTIONS = `ok-fine holds shared project knowledge outside the codebase, as OKF v0.2 markdown concepts grouped into projects. In a git repository, first run \`git remote get-url origin\` and call list_projects with that URL as \`repository\`; use the returned project(s) for every read and write. If none match, say the repository is not onboarded and offer to onboard it (ok-fine-onboard skill). Search before non-trivial work; record durable decisions, conventions, and runbooks afterwards.
@@ -26,10 +26,7 @@ const expectedRevision = z
   .nullable()
   .optional()
   .describe("Revision from read_concept; null = must not exist yet; omit to overwrite unconditionally");
-const expectedExisting = z
-  .string()
-  .optional()
-  .describe("Revision from read_concept; omit to act unconditionally");
+const expectedExisting = z.string().optional().describe("Revision from read_concept; omit to act unconditionally");
 const limit = z.number().int().min(1).max(100).optional();
 
 type Permission = "read" | "write" | "admin";
@@ -65,8 +62,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
     config: { title: string; description: string; inputSchema: S; annotations?: Record<string, boolean> },
     fn: (args: z.infer<S>) => unknown,
   ): void => {
-    const permitted =
-      need === "admin" ? principal.canAdmin : need === "write" ? principal.canWrite : principal.canRead;
+    const permitted = need === "admin" ? principal.canAdmin : need === "write" ? principal.canWrite : principal.canRead;
     if (!permitted) return;
     // Widen to the concrete ZodObject so the SDK's overload resolves; the SDK has already validated `args`
     // against this schema, so the cast only restores the inferred type.
@@ -129,7 +125,8 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
     "read",
     {
       title: "Search concepts",
-      description: "Keyword full-text search over concepts, optionally filtered by project, type, tags, status, trust tier, and staleness.",
+      description:
+        "Keyword full-text search over concepts, optionally filtered by project, type, tags, status, trust tier, and staleness.",
       inputSchema: z.object({
         query: z.string().optional(),
         project: z.string().optional(),
@@ -231,7 +228,8 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
     "write",
     {
       title: "Delete concept",
-      description: "Permanently remove a concept; prefer write_concept with `status: deprecated` to keep history visible.",
+      description:
+        "Permanently remove a concept; prefer write_concept with `status: deprecated` to keep history visible.",
       inputSchema: z.object({ project, id, actor, expectedRevision: expectedExisting }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },

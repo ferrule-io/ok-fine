@@ -24,11 +24,7 @@ export function redactRemote(url: string): string {
 }
 
 export function isPushRejection(stderr: string): boolean {
-  return (
-    stderr.includes("[rejected]") ||
-    stderr.includes("non-fast-forward") ||
-    stderr.includes("fetch first")
-  );
+  return stderr.includes("[rejected]") || stderr.includes("non-fast-forward") || stderr.includes("fetch first");
 }
 
 export class Git {
@@ -76,7 +72,7 @@ export class Git {
         "-c",
         "credential.helper=",
         "-c",
-        "credential.helper=!f() { echo username=$GIT_HTTP_USERNAME; echo password=$GIT_HTTP_PASSWORD; }; f"
+        "credential.helper=!f() { echo username=$GIT_HTTP_USERNAME; echo password=$GIT_HTTP_PASSWORD; }; f",
       );
     }
   }
@@ -106,7 +102,7 @@ export class Git {
 
   run(
     args: string[],
-    opts?: { allowFail?: boolean; stdin?: Buffer | string }
+    opts?: { allowFail?: boolean; stdin?: Buffer | string },
   ): Promise<{ code: number; stdout: string; stderr: string }> {
     const { promise, resolve, reject } = Promise.withResolvers<{
       code: number;
@@ -133,7 +129,7 @@ export class Git {
         } else {
           resolve({ code, stdout: stdoutStr, stderr: stderrStr });
         }
-      }
+      },
     );
 
     if (opts?.stdin != null && child.stdin) {

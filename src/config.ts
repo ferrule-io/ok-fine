@@ -58,7 +58,10 @@ const rawEnvSchema = z
     PORT: intEnv("PORT", "8080", 0, 65535),
     HOST: z.string().default("0.0.0.0"),
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
-    DATA_DIR: z.string().default("/data").refine((v) => v.startsWith("/"), "DATA_DIR must be an absolute path"),
+    DATA_DIR: z
+      .string()
+      .default("/data")
+      .refine((v) => v.startsWith("/"), "DATA_DIR must be an absolute path"),
     PUBLIC_BASE_URL: z
       .string({ message: "PUBLIC_BASE_URL is required" })
       .refine(httpUrl, "PUBLIC_BASE_URL must be a valid http or https URL"),
@@ -69,7 +72,9 @@ const rawEnvSchema = z
     OAUTH_SCOPE_WRITE: z.string().default("okf:write"),
     OAUTH_SCOPE_ADMIN: z.string().default("okf:admin"),
     OAUTH_IDENTITY_CLAIMS: z.string().default("preferred_username,email,sub"),
-    OAUTH_ALLOW_INSECURE_ISSUER: z.enum(["true", "false"], "OAUTH_ALLOW_INSECURE_ISSUER must be true or false").default("false"),
+    OAUTH_ALLOW_INSECURE_ISSUER: z
+      .enum(["true", "false"], "OAUTH_ALLOW_INSECURE_ISSUER must be true or false")
+      .default("false"),
     GIT_BRANCH: z.string().default("main"),
     GIT_REMOTE_URL: z.string().optional(),
     GIT_SYNC_INTERVAL_SECONDS: intEnv("GIT_SYNC_INTERVAL_SECONDS", "60", 0),
@@ -93,9 +98,7 @@ const rawEnvSchema = z
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
   const result = rawEnvSchema.safeParse(env);
   if (!result.success) {
-    const errorMessages = result.error.issues.map(
-      (issue) => `${issue.path.join(".") || "config"}: ${issue.message}`
-    );
+    const errorMessages = result.error.issues.map((issue) => `${issue.path.join(".") || "config"}: ${issue.message}`);
     throw new Error(`Configuration errors:\n  ${errorMessages.join("\n  ")}`);
   }
 
@@ -104,7 +107,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   let oauthAudiences: string[];
   if (raw.OAUTH_AUDIENCE && raw.OAUTH_AUDIENCE.trim().length > 0) {
-    oauthAudiences = raw.OAUTH_AUDIENCE.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+    oauthAudiences = raw.OAUTH_AUDIENCE.split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
   } else {
     oauthAudiences = [`${publicBaseUrl}/mcp`];
   }

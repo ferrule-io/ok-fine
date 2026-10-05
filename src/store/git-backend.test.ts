@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadConfig, type Logger } from "../config.js";
+import { type Logger, loadConfig } from "../config.js";
 import { pathExists } from "./fs-util.js";
 import { GitBackend } from "./git-backend.js";
 
@@ -51,7 +51,7 @@ describe("GitBackend", () => {
       storage.transaction({ projects: ["p"] }, async (tx) => {
         await tx.writeFile("p", "b.md", "# B\n");
         throw new Error("boom");
-      })
+      }),
     ).rejects.toThrow("boom");
 
     expect((await storage.tree("p")).hasFile("b.md")).toBe(false);

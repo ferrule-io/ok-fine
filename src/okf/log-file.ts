@@ -22,7 +22,7 @@ export function logUpdateEntry(
   id: string,
   actor: string,
   deprecated: boolean,
-  message?: string
+  message?: string,
 ): string {
   if (deprecated) {
     return appendMessage(`**Deprecation**: Deprecated [${title}](/${id}.md) (by ${actor}).`, message);
@@ -53,7 +53,7 @@ export function logImportEntry(actor: string, message?: string): string {
 export function prependLogEntry(
   existing: string | null,
   date: string, // YYYY-MM-DD UTC
-  entry: string
+  entry: string,
 ): string {
   let text = existing;
   if (!text || !/(?:^|\n)#[ \t]/.test(text)) {

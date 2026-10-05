@@ -1,5 +1,5 @@
-import { loadConfig, type Config } from "./config.js";
-import { startServer, type RunningServer } from "./server.js";
+import { type Config, loadConfig } from "./config.js";
+import { type RunningServer, startServer } from "./server.js";
 
 let config: Config;
 try {

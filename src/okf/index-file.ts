@@ -18,11 +18,14 @@ export function renderIndex(listing: DirListing): string {
   const sections: string[] = [];
 
   // Group concepts by type
-  const byType = new Map<string, Array<{
-    file: string;
-    title: string;
-    description: string | null;
-  }>>();
+  const byType = new Map<
+    string,
+    Array<{
+      file: string;
+      title: string;
+      description: string | null;
+    }>
+  >();
 
   for (const c of listing.concepts) {
     const typeKey = c.type && c.type.length > 0 ? c.type : "Other";

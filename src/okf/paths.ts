@@ -45,11 +45,7 @@ export function normalizeConceptIdForWrite(raw: string): string {
 
 export function normalizeFilePathForWrite(raw: string): string {
   if (raw.toLowerCase().endsWith(".md")) {
-    throw new OkfError(
-      "use_write_concept",
-      400,
-      "markdown files are concepts; use write_concept"
-    );
+    throw new OkfError("use_write_concept", 400, "markdown files are concepts; use write_concept");
   }
 
   let s = raw;

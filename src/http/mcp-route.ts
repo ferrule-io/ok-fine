@@ -1,5 +1,5 @@
-import type { FastifyInstance } from "fastify";
 import type { AuthInfo } from "@modelcontextprotocol/server";
+import type { FastifyInstance } from "fastify";
 
 /** The `fetch` face of the SDK's `createMcpHandler` result. */
 export type McpFetch = (request: Request, options: { authInfo?: AuthInfo; parsedBody?: unknown }) => Promise<Response>;
@@ -11,11 +11,7 @@ const DROPPED_HEADERS: Record<string, true> = {
   connection: true,
 };
 
-export function registerMcpRoute(
-  app: FastifyInstance,
-  mcpFetch: McpFetch,
-  publicBaseUrl: string,
-): void {
+export function registerMcpRoute(app: FastifyInstance, mcpFetch: McpFetch, publicBaseUrl: string): void {
   app.route({
     method: ["GET", "POST", "DELETE"],
     url: "/mcp",

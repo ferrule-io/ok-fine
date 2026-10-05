@@ -62,7 +62,7 @@ export interface StorageBackend {
   readFile(project: string, path: string): Promise<Buffer | null>;
   transaction<T>(
     spec: { projects: string[] },
-    work: (tx: StorageTx) => Promise<{ value: T; commit: CommitSpec | null }>
+    work: (tx: StorageTx) => Promise<{ value: T; commit: CommitSpec | null }>,
   ): Promise<TransactionResult<T>>;
   setResyncHandler(handler: ResyncHandler): void;
   history(project: string, path: string | null, limit: number): Promise<HistoryEntry[]>;

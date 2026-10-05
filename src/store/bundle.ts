@@ -1,8 +1,8 @@
 import { posix } from "node:path";
+import type { ConceptRecord } from "../okf/concept.js";
 import { type DirListing, renderIndex } from "../okf/index-file.js";
 import { type LintIssue, lintConceptFile, lintIndexFile, lintLogFile } from "../okf/lint.js";
 import { isReservedName } from "../okf/paths.js";
-import type { ConceptRecord } from "../okf/concept.js";
 import { displayTitle } from "../okf/semantics.js";
 import type { BundleSource } from "./backend.js";
 
@@ -140,7 +140,7 @@ export class BundleTree {
 export function buildDirListing(
   tree: BundleTree,
   relDir: string,
-  catalogLookup: (id: string) => ConceptRecord | undefined
+  catalogLookup: (id: string) => ConceptRecord | undefined,
 ): DirListing {
   const normRelDir = normalizeDir(relDir);
   const isRoot = normRelDir === "";
@@ -188,7 +188,7 @@ export function buildDirListing(
 export function planIndexes(
   tree: BundleTree,
   dirs: string[] | "all",
-  lookup: (id: string) => ConceptRecord | undefined
+  lookup: (id: string) => ConceptRecord | undefined,
 ): Array<{ path: string; content: string | null }> {
   if (tree.isEmpty) {
     return [];
@@ -239,7 +239,7 @@ export function planIndexes(
 
 export async function lintBundle(
   source: BundleSource,
-  now: Date
+  now: Date,
 ): Promise<{ conformant: boolean; issues: LintIssue[] }> {
   const issues: LintIssue[] = [];
   const tree = new BundleTree(source.paths);

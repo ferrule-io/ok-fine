@@ -446,7 +446,8 @@ See [`values.yaml`](charts/ok-fine/values.yaml) for the full list. `helm test ok
 mise install          # Node 24, pnpm 11
 pnpm install
 pnpm typecheck
-pnpm lint             # biome lint; warnings fail
+pnpm lint             # biome check: lint, formatting, import order; warnings fail
+pnpm format           # biome check --write: apply formatting and import order
 pnpm test             # unit, service (real git in temp dirs), and end-to-end suites
 pnpm build
 ```

@@ -17,7 +17,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "biome lint --error-on-warnings .",
+    "lint": "biome check --error-on-warnings .",
+    "format": "biome check --write .",
     "test": "vitest run",
     "start": "node dist/main.js",
     "dev:issuer": "node dist/dev/issuer-cli.js"

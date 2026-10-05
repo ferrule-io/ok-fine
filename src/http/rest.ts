@@ -81,7 +81,8 @@ const conceptJsonBody = z.object({
 function conceptInput(req: FastifyRequest): { frontmatter: Record<string, unknown>; body: string; message?: string } {
   if (typeof req.body === "string") {
     const split = splitFrontmatter(req.body);
-    if (!split) throw new OkfError("invalid_frontmatter", 400, "markdown must start with a --- delimited YAML frontmatter");
+    if (!split)
+      throw new OkfError("invalid_frontmatter", 400, "markdown must start with a --- delimited YAML frontmatter");
     const parsed = parseFrontmatter(split.yaml);
     if ("error" in parsed) throw new OkfError("invalid_frontmatter", 400, `${parsed.error}: ${parsed.message}`);
     return { frontmatter: parsed.data, body: split.body };
@@ -116,7 +117,9 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
   });
 
   app.post("/api/v1/projects", { config: write }, async (req, reply) => {
-    const body = z.object({ project: z.string(), title: z.string(), description: z.string().optional() }).parse(req.body);
+    const body = z
+      .object({ project: z.string(), title: z.string(), description: z.string().optional() })
+      .parse(req.body);
     const result = await service.createProject(principalOf(req), { ...body, actor: actorOf(req) });
     return reply.code(201).send(result);
   });
