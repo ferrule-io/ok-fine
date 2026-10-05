@@ -23,6 +23,7 @@ from your own identity provider.
 - [Configuration](#configuration)
 - [Deploying with Helm](#deploying-with-helm)
 - [Development](#development)
+- [CI and releases](#ci-and-releases)
 
 ## How it works
 
@@ -326,18 +327,18 @@ variable.
 
 ## Deploying with Helm
 
-The chart lives in [`charts/ok-fine`](charts/ok-fine). It runs a single replica with a `Recreate` strategy and a
-`ReadWriteOnce` PVC (kept on uninstall), as a non-root user with a read-only root filesystem.
+The chart runs a single replica with a `Recreate` strategy and a `ReadWriteOnce` PVC (kept on uninstall), as a
+non-root user with a read-only root filesystem. Installing from `charts/ok-fine` in a repository checkout also works.
 
 ```sh
-helm install okf charts/ok-fine \
+helm install okf oci://ghcr.io/ferrule-io/charts/ok-fine --version <version> \
   --namespace okf --create-namespace \
   --set config.publicBaseUrl=https://okf.example.com \
   --set oauth.issuer=https://idp.example.com/realms/okf \
   --set ingress.enabled=true --set ingress.className=nginx
 ```
 
-The default image is `ghcr.io/ferrule-io/ok-fine`. Build your own with `docker build -t <registry>/ok-fine:<tag> .`
+The default image `ghcr.io/ferrule-io/ok-fine` is multi-arch (`linux/amd64`, `linux/arm64`), tagged `<version>`, `latest`, `sha-<short>`. Build your own with `docker build -t <registry>/ok-fine:<tag> .`
 and set `image.repository` / `image.tag` (or `image.digest`).
 
 Sync to a git remote over SSH:
@@ -347,7 +348,7 @@ kubectl -n okf create secret generic okf-git \
   --from-file=ssh-privatekey=./deploy_key \
   --from-file=known_hosts=./known_hosts
 
-helm upgrade okf charts/ok-fine --reuse-values \
+helm upgrade okf oci://ghcr.io/ferrule-io/charts/ok-fine --reuse-values \
   --set git.remote.url=git@github.com:acme/knowledge.git \
   --set git.remote.auth=ssh \
   --set git.remote.existingSecret=okf-git
@@ -388,6 +389,14 @@ Layout:
 | `src/server.ts` | Wiring (used by `main.ts` and the end-to-end test) |
 | `src/dev/` | Development token issuer |
 | `charts/ok-fine/` | Helm chart |
+
+## CI and releases
+
+- **Push to `development`** runs `.github/workflows/ci.yml`: `pnpm typecheck`, `pnpm test`, `pnpm build`, `helm lint --strict`, and Docker builds for `amd64` and `arm64` on native runners.
+- **Push to `main`** runs `.github/workflows/release.yml`: runs CI, then the release job computes next version (minor+1 over max of `Chart.yaml` version and latest `vX.Y.Z` tag), commits `chore(release): vX.Y.Z` to `main` bumping `charts/ok-fine/Chart.yaml` (version + appVersion), `package.json`, and `src/version.ts`, tags it, builds the per-arch images natively and merges them into a multi-arch manifest (tags `X.Y.Z`, `sha-<short>`, and `latest` only when it is the highest release), pushes the chart to `oci://ghcr.io/ferrule-io/charts`, then merges the release commit back into `development` (fails rather than force-pushing on conflict). Reruns reuse the existing release commit/tag.
+- **One release per run of pushes:** releases are serialized (`concurrency: release`). A push that lands while a release is running supersedes older queued pushes, and a run whose commit is no longer `main`'s head fails with `main moved past <sha>`; the newest push releases everything since the last tag, with a single minor bump.
+- **Prerequisites:** if `main`/`development` have branch protection or rulesets, allow GitHub Actions to push to them; make the GHCR `ok-fine` and `charts/ok-fine` packages public after the first release.
+- **Caching:** buildx GHA cache per arch shared by CI and release (`main` reads caches from the default branch `development`), mise toolchain cache, and pnpm store cache keyed on `pnpm-lock.yaml`.
 
 ## License
 

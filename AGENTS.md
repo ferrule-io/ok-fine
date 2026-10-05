@@ -83,3 +83,6 @@ Break any of these and you have a bug.
   `helm.sh/resource-policy: keep`.
 - For Kubernetes testing, use a local cluster (e.g. `minikube -p ok-fine`) and pin `--context`/`--kube-context` on
   every command. Never assume the current context is safe.
+- CI/release workflows live in `.github/workflows/` (`ci.yml` reusable via `workflow_call`; `release.yml` on `main`).
+- Versions in `charts/ok-fine/Chart.yaml` (version + appVersion), `package.json`, and `src/version.ts` are bumped by the release workflow — don't hand-edit them.
+- Keep the buildx cache scopes (`image-amd64`, `image-arm64`) identical in both workflows.
