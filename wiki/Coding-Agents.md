@@ -1,0 +1,69 @@
+ok-fine works with Claude Code, OpenAI Codex CLI, Gemini CLI, pi, and oh-my-pi (omp) on existing codebases
+without changing a single file in them. There is no `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.mcp.json`, or
+settings file to commit: knowledge and the repository-to-project binding both live in ok-fine. Each developer
+installs one agent package and configures the ok-fine MCP server once per harness.
+
+The agent package is built from [`agents/`](https://github.com/ferrule-io/ok-fine/tree/main/agents) and published to
+[`ferrule-io/ok-fine-agents`](https://github.com/ferrule-io/ok-fine-agents) on every release. It contains:
+
+- three [Agent Skills](https://agentskills.io): `ok-fine` (find the project, recall before work, record after),
+  `ok-fine-onboard` (bind a repository and bootstrap knowledge), and `ok-fine-review` (lint, staleness, drift,
+  verification);
+- a SessionStart hook (Claude Code, Codex, Gemini CLI) and a pi/omp extension that tell the agent which git remote
+  the session is in. They run locally and never call ok-fine.
+
+# Lifecycle
+
+| Stage | Who / when | Mechanism |
+|---|---|---|
+| 1. Org setup | Once per org | Deploy ok-fine and configure the identity provider (below). |
+| 2. Developer setup | Once per developer per harness | Install the package, add a user-scope MCP server named `ok-fine`, and log in with the harness's OAuth flow. |
+| 3. Repository onboarding | Once per codebase, by anyone with `okf:write` | Ask the agent to "onboard this repository to ok-fine". The `ok-fine-onboard` skill creates or picks the project, adds the git remote to the overview's `repositories`, and bootstraps up to 30 concepts. The codebase is untouched. |
+| 4. Every session | Automatic | The hook/extension tells the agent the repository URL; server instructions and the `ok-fine` skill drive `list_projects(repository=…)`, recall (overview, index, search) before work, and capture of durable knowledge after. |
+| 5. Maintenance | On demand | Ask the agent to "review ok-fine knowledge". The `ok-fine-review` skill runs lint, finds stale, unverified, and drifted concepts (sources carry `commit`), updates or deprecates them, and records human verification only on explicit confirmation. |
+
+# Repository binding
+
+A project is bound to codebases through the `repositories` list in its `overview` frontmatter:
+
+```yaml
+type: Project
+title: Shop
+repositories:
+  - git@github.com:acme/shop.git
+```
+
+`list_projects` (and `GET /api/v1/projects?repository=`) normalizes remotes before comparing: scheme, userinfo,
+port, and a trailing `.git` are dropped and the result is lowercased, so `git@github.com:Acme/Shop.git`,
+`https://github.com/acme/shop`, and `ssh://git@github.com:22/acme/shop` all match `github.com/acme/shop`. Local
+paths are rejected with `bad_request`. One repository may be bound to several projects (and one project to
+several repositories) for monorepo splits and multi-repo products.
+
+# Identity provider requirements
+
+- Audience `<PUBLIC_BASE_URL>/mcp`, scopes `okf:read okf:write okf:admin`, JWT access tokens.
+- The `iss` parameter in authorization responses (RFC 9207); Gemini CLI rejects responses without it.
+- Dynamic client registration or client ID metadata documents, or one public client with loopback redirect URIs
+  that developers pass as the client ID below.
+
+# Per-harness setup
+
+Replace `https://okf.example.com` with your `PUBLIC_BASE_URL`.
+
+| Harness | Install package | Add server | Log in |
+|---|---|---|---|
+| Claude Code | `claude plugin marketplace add ferrule-io/ok-fine-agents` then `claude plugin install ok-fine@ok-fine` | `claude mcp add --transport http --scope user ok-fine https://okf.example.com/mcp` (pre-registered client: add `--client-id <id> --callback-port <port>`) | `/mcp` |
+| Codex CLI | `codex plugin marketplace add ferrule-io/ok-fine-agents`, install `ok-fine` from `/plugins`, trust its hook in `/hooks` | `codex mcp add ok-fine --url https://okf.example.com/mcp` (pre-registered: `--oauth-client-id <id>`) | `codex mcp login ok-fine` |
+| Gemini CLI | `gemini extensions install https://github.com/ferrule-io/ok-fine-agents --auto-update` | `gemini mcp add -s user -t http ok-fine https://okf.example.com/mcp` (pre-registered: `oauth.clientId` in `~/.gemini/settings.json`) | `/mcp auth ok-fine` |
+| pi | `pi install git:github.com/ferrule-io/ok-fine-agents` | `~/.pi/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"url":"https://okf.example.com/mcp","exposure":"direct"}}}` (pre-registered: `oauth.clientId`/`callbackPort`) | `pi mcp login ok-fine` |
+| omp | `omp plugin marketplace add ferrule-io/ok-fine-agents` then `omp plugin install ok-fine@ok-fine` | `~/.omp/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"type":"http","url":"https://okf.example.com/mcp"}}}` | `/mcp reauth ok-fine` |
+
+Headless use without OAuth: mint a token and pass it as a static header — Claude Code
+`--header "Authorization: Bearer ${OKF_TOKEN}"`, Codex `--bearer-token-env-var OKF_TOKEN`, pi/omp
+`"headers": {"Authorization": "Bearer ${OKF_TOKEN}"}`.
+
+# Daily use
+
+Say "onboard this repository to ok-fine" once per codebase, then work normally: the agent recalls relevant
+knowledge before non-trivial tasks and records durable decisions, conventions, and runbooks afterwards. Say
+"review ok-fine knowledge" to audit and refresh it. Nothing is ever written into the codebase.

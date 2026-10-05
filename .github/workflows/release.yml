@@ -330,6 +330,46 @@ jobs:
             git push origin "v${VERSION}"
           fi
 
+  wiki:
+    name: Publish wiki
+    needs: release-commit
+    if: needs.release-commit.outputs.is_latest == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-commit.outputs.sha }}
+          path: source
+
+      - name: Mirror wiki/ to the repository wiki
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          VERSION: ${{ needs.release-commit.outputs.version }}
+          RELEASE_SHA: ${{ needs.release-commit.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git clone --depth 1 "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPOSITORY}.wiki.git" wiki; then
+            echo "::error::Cannot clone the ${REPOSITORY} wiki; save its first page at https://github.com/${REPOSITORY}/wiki once, then rerun this job"
+            exit 1
+          fi
+          cd wiki
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a ../source/wiki/. .
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki already matches v${VERSION}"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Release v${VERSION} (ferrule-io/ok-fine@${RELEASE_SHA:0:7})"
+          git push origin HEAD
+
   merge-back:
     name: Merge release to development
     needs: [release-commit, manifest, chart]

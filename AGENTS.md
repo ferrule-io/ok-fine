@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents working on this repository. User-facing documentation is in [README.md](README.md).
+Guidance for coding agents working on this repository. User-facing documentation is in [README.md](README.md) (landing page and quick start) and [`wiki/`](wiki/) (everything else, published to the GitHub wiki on release).
 
 ## Commands
 
@@ -33,6 +33,7 @@ Dependencies point downward only:
 | Auth | `src/auth/` | JWT resource server. ok-fine never issues tokens. |
 | Dev only | `src/dev/` | Unauthenticated token issuer for tests and local runs. Never wire it into the server. |
 | Agent package | `agents/` | Skills, SessionStart hook, pi/omp extension, harness manifests. Never imports from `src/`; mirrored to `ferrule-io/ok-fine-agents` on release, so edit here only. |
+| Docs | `wiki/` | GitHub wiki source; the `wiki` job in `release.yml` mirrors it to the repository wiki on release, so edit here only. Page titles come from file names; link between pages with full `https://github.com/ferrule-io/ok-fine/wiki/<Page>` URLs. |
 
 ## Invariants
 
@@ -73,7 +74,7 @@ Break any of these and you have a bug.
 - Strict mode with `noUncheckedIndexedAccess`. No `any`. Validate external input with zod; keep unchecked casts
   rare and commented.
 - Config comes only from `loadConfig(env)`. Don't read `process.env` elsewhere, because tests pass custom env.
-- Keep the MCP tool table, REST route table, and environment variable table in README.md in sync with the code.
+- Keep the MCP tool table (`wiki/MCP-Tools.md`), REST route table (`wiki/REST-API.md`), and environment variable table (`wiki/Configuration.md`) in sync with the code.
 
 ## Tests
 

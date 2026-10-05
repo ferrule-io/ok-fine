@@ -9,7 +9,7 @@ Connects Claude Code, OpenAI Codex CLI, Gemini CLI, pi, and oh-my-pi (omp) to an
 file in your codebases. It ships three Agent Skills (`ok-fine`, `ok-fine-onboard`, `ok-fine-review`), a
 SessionStart hook for Claude Code, Codex, and Gemini CLI, and an extension for pi and omp that tell the agent
 which git repository it is in. See
-[Using ok-fine from coding agents](https://github.com/ferrule-io/ok-fine#using-ok-fine-from-coding-agents) for the
+[Using ok-fine from coding agents](https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents) for the
 full lifecycle and identity-provider requirements.
 
 ## Setup
