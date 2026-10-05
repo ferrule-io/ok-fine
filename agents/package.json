@@ -1,0 +1,24 @@
+{
+  "name": "@ferrule-io/ok-fine-agents",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Use an ok-fine knowledge server as shared project memory: resolve the current repository's project, recall before work, record durable knowledge, onboard and review repositories.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "skills": [
+      "./skills"
+    ],
+    "extensions": [
+      "./extensions/ok-fine.ts"
+    ]
+  },
+  "omp": {
+    "extensions": [
+      "./extensions/ok-fine.ts"
+    ]
+  }
+}

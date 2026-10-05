@@ -1,0 +1,18 @@
+{
+  "name": "ok-fine",
+  "displayName": "ok-fine",
+  "version": "0.1.0",
+  "description": "Use an ok-fine knowledge server as shared project memory: resolve the current repository's project, recall before work, record durable knowledge, onboard and review repositories.",
+  "author": {
+    "name": "ferrule-io"
+  },
+  "homepage": "https://github.com/ferrule-io/ok-fine#using-ok-fine-from-coding-agents",
+  "repository": "https://github.com/ferrule-io/ok-fine",
+  "license": "Apache-2.0",
+  "keywords": [
+    "okf",
+    "knowledge",
+    "mcp",
+    "memory"
+  ]
+}

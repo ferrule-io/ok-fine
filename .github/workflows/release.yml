@@ -97,8 +97,12 @@ jobs:
             sed -i.bak -E "s/^version: .*/version: ${version}/; s/^appVersion: .*/appVersion: \"${version}\"/" charts/ok-fine/Chart.yaml && rm -f charts/ok-fine/Chart.yaml.bak
             sed -i.bak -E "s/\"version\": \"[^\"]+\"/\"version\": \"${version}\"/" package.json && rm -f package.json.bak
             sed -i.bak -E "s/export const VERSION = \"[^\"]+\";/export const VERSION = \"${version}\";/" src/version.ts && rm -f src/version.ts.bak
+            agent_manifests=(agents/package.json agents/plugin.json agents/gemini-extension.json agents/.claude-plugin/plugin.json)
+            for f in "${agent_manifests[@]}"; do
+              sed -i.bak -E "s/\"version\": \"[^\"]+\"/\"version\": \"${version}\"/" "$f" && rm -f "$f.bak"
+            done
 
-            git add charts/ok-fine/Chart.yaml package.json src/version.ts
+            git add charts/ok-fine/Chart.yaml package.json src/version.ts "${agent_manifests[@]}"
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "chore(release): v${version}"
@@ -277,6 +281,55 @@ jobs:
           test -f "$RUNNER_TEMP/ok-fine-${VERSION}.tgz"
           echo "$GITHUB_TOKEN" | helm registry login ghcr.io -u "$REGISTRY_USER" --password-stdin
           helm push "$RUNNER_TEMP/ok-fine-${VERSION}.tgz" "oci://ghcr.io/${REGISTRY_OWNER}/charts"
+
+  agents:
+    name: Publish agent package
+    needs: release-commit
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-commit.outputs.sha }}
+          path: source
+
+      - name: Checkout ok-fine-agents mirror
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ github.repository_owner }}/ok-fine-agents
+          ref: main
+          ssh-key: ${{ secrets.AGENTS_DEPLOY_KEY }}
+          fetch-depth: 0
+          path: mirror
+
+      - name: Mirror agents/ and tag
+        working-directory: mirror
+        env:
+          VERSION: ${{ needs.release-commit.outputs.version }}
+          RELEASE_SHA: ${{ needs.release-commit.outputs.sha }}
+          IS_LATEST: ${{ needs.release-commit.outputs.is_latest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "v${VERSION} already published"
+            exit 0
+          fi
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -a ../source/agents/. .
+          cp ../source/LICENSE ./LICENSE
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "Release v${VERSION} (ferrule-io/ok-fine@${RELEASE_SHA:0:7})"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          if [ "$IS_LATEST" = "true" ]; then
+            git push origin HEAD:main "v${VERSION}"
+          else
+            git push origin "v${VERSION}"
+          fi
 
   merge-back:
     name: Merge release to development

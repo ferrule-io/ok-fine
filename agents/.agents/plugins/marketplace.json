@@ -1,0 +1,20 @@
+{
+  "name": "ok-fine",
+  "interface": {
+    "displayName": "ok-fine"
+  },
+  "plugins": [
+    {
+      "name": "ok-fine",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

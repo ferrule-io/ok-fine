@@ -1,0 +1,16 @@
+{
+  "name": "ok-fine",
+  "owner": {
+    "name": "ferrule-io"
+  },
+  "metadata": {
+    "description": "ok-fine agent integration"
+  },
+  "plugins": [
+    {
+      "name": "ok-fine",
+      "source": ".",
+      "description": "ok-fine knowledge skills and session hook"
+    }
+  ]
+}
