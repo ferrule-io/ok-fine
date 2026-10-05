@@ -1,0 +1,40 @@
+{
+  "name": "ok-fine",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OKF v0.2 knowledge repository for AI agents (MCP + REST)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ferrule-io/ok-fine.git"
+  },
+  "homepage": "https://github.com/ferrule-io/ok-fine#readme",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@11.22.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js",
+    "dev:issuer": "node dist/dev/issuer-cli.js"
+  },
+  "dependencies": {
+    "fastify": "^5.12.5",
+    "@modelcontextprotocol/server": "^2.3.1",
+    "zod": "^4.6.5",
+    "jose": "^6.2.12",
+    "yaml": "^2.9.1",
+    "minisearch": "^7.2.0",
+    "marked": "^18.1.0",
+    "tar": "^7.5.22"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11",
+    "@types/node": "^24.19.1",
+    "@modelcontextprotocol/client": "^2.3.1"
+  }
+}

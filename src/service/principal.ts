@@ -1,0 +1,42 @@
+import { OkfError } from "../errors.js";
+import { parseActor } from "../okf/semantics.js";
+
+export interface Principal {
+  subject: string;
+  clientId: string;
+  identity: string | null;
+  scopes: string[];
+  canRead: boolean;
+  canWrite: boolean;
+  canAdmin: boolean;
+}
+
+export function checkActor(actor: string, p: Principal): string {
+  const parsed = parseActor(actor);
+  if (!parsed) {
+    throw new OkfError(
+      "invalid_actor",
+      400,
+      "actor must be <producer>/<version>, human:<id>, or process:<id>"
+    );
+  }
+
+  if (parsed.kind === "human") {
+    if (p.identity === null) {
+      throw new OkfError(
+        "forbidden_actor",
+        403,
+        "this token carries no identity claim; human: actors are not allowed"
+      );
+    }
+    if (parsed.id !== p.identity) {
+      throw new OkfError(
+        "forbidden_actor",
+        403,
+        `this token may only act as human:${p.identity}`
+      );
+    }
+  }
+
+  return actor;
+}

@@ -1,0 +1,183 @@
+{{- $auth := .Values.git.remote.auth -}}
+{{- if not (has $auth (list "none" "ssh" "https")) -}}
+{{- fail "git.remote.auth must be none, ssh, or https" -}}
+{{- end -}}
+{{- if ne $auth "none" -}}
+{{- if not .Values.git.remote.url -}}
+{{- fail "git.remote.url is required when git.remote.auth is ssh or https" -}}
+{{- end -}}
+{{- if not .Values.git.remote.existingSecret -}}
+{{- fail "git.remote.existingSecret is required when git.remote.auth is ssh or https" -}}
+{{- end -}}
+{{- end -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ok-fine.fullname" . }}
+  labels:
+    {{- include "ok-fine.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ok-fine.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "ok-fine.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ok-fine.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      containers:
+        - name: ok-fine
+          image: {{ include "ok-fine.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: DATA_DIR
+              value: "/data"
+            - name: PUBLIC_BASE_URL
+              value: {{ include "ok-fine.publicBaseUrl" . | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: MAX_FILE_BYTES
+              value: {{ .Values.config.maxFileBytes | int | quote }}
+            - name: MAX_ARCHIVE_BYTES
+              value: {{ .Values.config.maxArchiveBytes | int | quote }}
+            - name: OAUTH_ISSUER
+              value: {{ required "oauth.issuer is required" .Values.oauth.issuer | quote }}
+            {{- if .Values.oauth.audiences }}
+            - name: OAUTH_AUDIENCE
+              value: {{ join "," .Values.oauth.audiences | quote }}
+            {{- end }}
+            {{- if .Values.oauth.jwksUri }}
+            - name: OAUTH_JWKS_URI
+              value: {{ .Values.oauth.jwksUri | quote }}
+            {{- end }}
+            - name: OAUTH_SCOPE_READ
+              value: {{ .Values.oauth.scopes.read | quote }}
+            - name: OAUTH_SCOPE_WRITE
+              value: {{ .Values.oauth.scopes.write | quote }}
+            - name: OAUTH_SCOPE_ADMIN
+              value: {{ .Values.oauth.scopes.admin | quote }}
+            - name: OAUTH_IDENTITY_CLAIMS
+              value: {{ join "," .Values.oauth.identityClaims | quote }}
+            - name: OAUTH_ALLOW_INSECURE_ISSUER
+              value: {{ .Values.oauth.allowInsecureIssuer | quote }}
+            - name: GIT_BRANCH
+              value: {{ .Values.git.branch | quote }}
+            {{- if .Values.git.remote.url }}
+            - name: GIT_REMOTE_URL
+              value: {{ .Values.git.remote.url | quote }}
+            - name: GIT_SYNC_INTERVAL_SECONDS
+              value: {{ .Values.git.remote.syncIntervalSeconds | quote }}
+            {{- end }}
+            {{- if eq $auth "ssh" }}
+            - name: GIT_SSH_KEY_PATH
+              value: {{ printf "/etc/ok-fine/git/%s" .Values.git.remote.sshPrivateKeyKey | quote }}
+            {{- if .Values.git.remote.knownHostsKey }}
+            - name: GIT_SSH_KNOWN_HOSTS_PATH
+              value: {{ printf "/etc/ok-fine/git/%s" .Values.git.remote.knownHostsKey | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if eq $auth "https" }}
+            - name: GIT_HTTP_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.git.remote.existingSecret | quote }}
+                  key: {{ .Values.git.remote.httpUsernameKey | quote }}
+            - name: GIT_HTTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.git.remote.existingSecret | quote }}
+                  key: {{ .Values.git.remote.httpPasswordKey | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+            {{- if eq $auth "ssh" }}
+            - name: git-credentials
+              mountPath: /etc/ok-fine/git
+              readOnly: true
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "ok-fine.dataClaimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if eq $auth "ssh" }}
+        - name: git-credentials
+          secret:
+            secretName: {{ .Values.git.remote.existingSecret | quote }}
+            defaultMode: 0440
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

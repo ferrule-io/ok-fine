@@ -1,0 +1,88 @@
+image:
+  repository: ghcr.io/ferrule-io/ok-fine
+  tag: ""            # defaults to .Chart.AppVersion
+  digest: ""         # wins over tag when set
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+config:
+  publicBaseUrl: ""  # REQUIRED, e.g. https://okf.example.com; MCP endpoint is <publicBaseUrl>/mcp
+  logLevel: info
+  maxFileBytes: 1048576
+  maxArchiveBytes: 52428800
+oauth:
+  issuer: ""         # REQUIRED; must equal the access token `iss` exactly
+  audiences: []      # default ["<publicBaseUrl>/mcp"]
+  jwksUri: ""        # default: discovered from the issuer
+  scopes:
+    read: okf:read
+    write: okf:write
+    admin: okf:admin
+  identityClaims: [preferred_username, email, sub]
+  allowInsecureIssuer: false   # development only (http:// issuer)
+git:
+  branch: main
+  remote:
+    url: ""          # empty = history kept only on the PVC
+    auth: none       # none | ssh | https
+    existingSecret: ""
+    sshPrivateKeyKey: ssh-privatekey
+    knownHostsKey: known_hosts   # optional key; when absent the host key is trusted on first use
+    httpUsernameKey: username
+    httpPasswordKey: password
+    syncIntervalSeconds: 60
+persistence:
+  enabled: true      # false = emptyDir (data lost on restart unless a remote is configured)
+  existingClaim: ""
+  storageClass: ""   # "-" renders storageClassName: ""
+  accessModes: [ReadWriteOnce]
+  size: 5Gi
+  annotations: {}
+extraEnv: []
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  tls:
+    secretName: ""
+httpRoute:
+  enabled: false
+  annotations: {}
+  parentRefs: []
+networkPolicy:
+  enabled: false
+  ingressFrom: []
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+terminationGracePeriodSeconds: 30
+nodeSelector: {}
+tolerations: []
+affinity: {}

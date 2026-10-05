@@ -1,0 +1,13 @@
+ok-fine has been deployed.
+
+MCP endpoint:
+  {{ include "ok-fine.publicBaseUrl" . }}/mcp
+
+REST API:
+  {{ include "ok-fine.publicBaseUrl" . }}/api/v1
+
+OAuth metadata:
+  {{ include "ok-fine.publicBaseUrl" . }}/.well-known/oauth-protected-resource/mcp
+
+To port-forward the service locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ok-fine.fullname" . }} 8080:{{ .Values.service.port }}
