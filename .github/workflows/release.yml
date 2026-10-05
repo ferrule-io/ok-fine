@@ -90,9 +90,8 @@ jobs:
               exit 1
             fi
 
-            IFS='.' read -r major minor _ <<< "$base_version"
-            next_minor=$((minor + 1))
-            version="${major}.${next_minor}.0"
+            IFS='.' read -r major minor patch <<< "$base_version"
+            version="${major}.${minor}.$((patch + 1))"
 
             sed -i.bak -E "s/^version: .*/version: ${version}/; s/^appVersion: .*/appVersion: \"${version}\"/" charts/ok-fine/Chart.yaml && rm -f charts/ok-fine/Chart.yaml.bak
             sed -i.bak -E "s/\"version\": \"[^\"]+\"/\"version\": \"${version}\"/" package.json && rm -f package.json.bak
