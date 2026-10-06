@@ -319,13 +319,14 @@ describe("ok-fine over stdio", () => {
     });
     expect(created.isError).toBeFalsy();
 
-    const forged = await call(client, "create_project", {
+    const forged = await call<{ error: { code: string; message: string } }>(client, "create_project", {
       project: "other",
       title: "Other",
       actor: "human:other@example.com",
     });
     expect(forged.isError).toBe(true);
-    expect(forged.content[0]?.text).toBe("forbidden_actor: this token may only act as human:dev@example.com");
+    expect(forged.structuredContent.error.code).toBe("forbidden_actor");
+    expect(forged.structuredContent.error.message).toBe("this token may only act as human:dev@example.com");
   });
 
   it("finishes when the client closes stdin", async () => {

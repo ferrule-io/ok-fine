@@ -31,4 +31,10 @@ describe("parseCli", () => {
   it("rejects unknown commands", () => {
     expect(() => parseCli(["bogus"], {}, HOME)).toThrow('unknown command "bogus"');
   });
+
+  it("lets --help and --version win over unknown flags and commands", () => {
+    expect(parseCli(["bogus", "--help", "--nope"], {}, HOME).command).toBe("help");
+    expect(parseCli(["--port", "1", "-v"], {}, HOME).command).toBe("version");
+    expect(() => parseCli(["--nope"], {}, HOME)).toThrow();
+  });
 });

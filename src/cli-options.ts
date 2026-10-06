@@ -48,6 +48,11 @@ const SERVE_ONLY_FLAGS = ["port", "host", "public-base-url", "no-auth"] as const
 
 /** Pure: maps argv and the process env to a command and the env its config loader reads. Throws on bad usage. */
 export function parseCli(argv: string[], env: Record<string, string | undefined>, homeDir: string): CliInvocation {
+  // --help/--version win over everything else, including unknown flags and bad commands.
+  const flags = argv.includes("--") ? argv.slice(0, argv.indexOf("--")) : argv;
+  if (flags.includes("--help") || flags.includes("-h")) return { command: "help", env };
+  if (flags.includes("--version") || flags.includes("-v")) return { command: "version", env };
+
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -62,13 +67,8 @@ export function parseCli(argv: string[], env: Record<string, string | undefined>
       host: { type: "string" },
       "public-base-url": { type: "string" },
       "no-auth": { type: "boolean" },
-      help: { type: "boolean", short: "h" },
-      version: { type: "boolean", short: "v" },
     },
   });
-
-  if (values.help) return { command: "help", env };
-  if (values.version) return { command: "version", env };
 
   let command: "stdio" | "serve";
   if (positionals.length === 0 || (positionals.length === 1 && positionals[0] === "stdio")) {
