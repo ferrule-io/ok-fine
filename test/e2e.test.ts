@@ -12,17 +12,31 @@ import * as tar from "tar";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, loadStorageConfig } from "../src/config.js";
 import { type DevIssuer, startDevIssuer } from "../src/dev/issuer.js";
+import type { UiClientConfig } from "../src/http/ui.js";
 import { type RunningServer, type RunningStdioServer, startServer, startStdioServer } from "../src/server.js";
+import { VERSION } from "../src/version.js";
+import {
+  buildAuthorizationUrl,
+  completeAuthorization,
+  discoverAuth,
+  type KeyValueStore,
+  resolveClientId,
+} from "../web/src/auth/flow.js";
 
 const PUBLIC = "http://okf.test";
 
 let issuer: DevIssuer;
 let server: RunningServer;
 let dataDir: string;
+let uiDir: string;
 
 beforeAll(async () => {
   issuer = await startDevIssuer({ audience: `${PUBLIC}/mcp` });
   dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "okf-"));
+  uiDir = await fs.mkdtemp(path.join(os.tmpdir(), "okf-"));
+  await fs.mkdir(path.join(uiDir, "assets"));
+  await fs.writeFile(path.join(uiDir, "index.html"), "<!doctype html><title>e2e</title>");
+  await fs.writeFile(path.join(uiDir, "assets", "app.js"), "export {};");
   server = await startServer(
     loadConfig({
       PORT: "0",
@@ -31,8 +45,10 @@ beforeAll(async () => {
       PUBLIC_BASE_URL: PUBLIC,
       OAUTH_ISSUER: issuer.url,
       OAUTH_ALLOW_INSECURE_ISSUER: "true",
+      OAUTH_UI_CLIENT_ID: "okf-web",
       LOG_LEVEL: "silent",
     }),
+    { uiDir },
   );
 });
 
@@ -40,6 +56,7 @@ afterAll(async () => {
   await server?.close();
   await issuer?.close();
   if (dataDir) await fs.rm(dataDir, { recursive: true, force: true });
+  if (uiDir) await fs.rm(uiDir, { recursive: true, force: true });
 });
 
 async function connect(token: string): Promise<Client> {
@@ -251,6 +268,74 @@ describe("ok-fine end to end", () => {
   });
 });
 
+describe("web UI", () => {
+  const redirectUri = `${PUBLIC}/ui/callback`;
+  const memoryStore = (): KeyValueStore & { size(): number } => {
+    const map = new Map<string, string>();
+    return {
+      getItem: (k) => map.get(k) ?? null,
+      setItem: (k, v) => void map.set(k, v),
+      removeItem: (k) => void map.delete(k),
+      size: () => map.size,
+    };
+  };
+
+  it("serves client config", async () => {
+    const res = await fetch(`${server.url}/ui/config.json`);
+    expect(await res.json()).toEqual({
+      authMode: "oidc",
+      oauthClientId: "okf-web",
+      scope: "okf:read",
+      version: VERSION,
+    });
+  });
+
+  it("serves the SPA with the IdP token endpoint in connect-src and keeps the API protected", async () => {
+    const page = await fetch(`${server.url}/ui/p/demo/c/x`);
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    expect(page.headers.get("content-security-policy")).toContain(`connect-src 'self' ${issuer.url}`);
+    const api = await fetch(`${server.url}/api/v1/projects`);
+    expect(api.status).toBe(401);
+  });
+
+  it("signs in with authorization code + PKCE through the same discovery MCP clients use", async () => {
+    const discovery = await discoverAuth(server.url);
+    expect(discovery.resource).toBe(`${PUBLIC}/mcp`);
+    const config: UiClientConfig = { authMode: "oidc", oauthClientId: "okf-web", scope: "okf:read", version: VERSION };
+
+    const configuredStore = memoryStore();
+    expect(await resolveClientId(discovery, config, redirectUri, configuredStore)).toBe("okf-web");
+    expect(configuredStore.size()).toBe(0);
+
+    const dcrStore = memoryStore();
+    const dcrConfig = { ...config, oauthClientId: null };
+    const clientId = await resolveClientId(discovery, dcrConfig, redirectUri, dcrStore);
+    expect(clientId).toMatch(/^dev-/);
+    expect(dcrStore.size()).toBe(1);
+    expect(await resolveClientId(discovery, dcrConfig, redirectUri, dcrStore)).toBe(clientId);
+
+    const authorize = async () => {
+      const { url, pending } = await buildAuthorizationUrl(discovery, clientId, redirectUri, "okf:read", "/");
+      const res = await fetch(url, { redirect: "manual" });
+      expect(res.status).toBe(302);
+      return { pending, callback: new URL(res.headers.get("location") ?? "") };
+    };
+
+    const first = await authorize();
+    const token = await completeAuthorization(discovery, first.pending, first.callback);
+    const projects = await fetch(`${server.url}/api/v1/projects`, {
+      headers: { authorization: `Bearer ${token.accessToken}` },
+    });
+    expect(projects.status).toBe(200);
+
+    const second = await authorize();
+    await expect(
+      completeAuthorization(discovery, { ...second.pending, state: "tampered" }, second.callback),
+    ).rejects.toThrow();
+  });
+});
+
 describe("ok-fine with AUTH_MODE=none", () => {
   let noneServer: RunningServer;
   let noneDataDir: string;
@@ -266,6 +351,7 @@ describe("ok-fine with AUTH_MODE=none", () => {
         PUBLIC_BASE_URL: PUBLIC,
         LOG_LEVEL: "silent",
       }),
+      { uiDir },
     );
   });
 
@@ -400,6 +486,11 @@ describe("ok-fine with AUTH_MODE=none", () => {
     expect(res.statusCode).toBe(200);
     const json = JSON.parse(res.body) as { status?: string };
     expect(json.status).toBe("ok");
+  });
+
+  it("serves client config with auth off", async () => {
+    const res = await fetch(`${noneServer.url}/ui/config.json`);
+    expect(await res.json()).toEqual({ authMode: "none", oauthClientId: null, scope: "okf:read", version: VERSION });
   });
 });
 

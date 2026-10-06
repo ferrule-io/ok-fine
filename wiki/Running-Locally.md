@@ -93,6 +93,8 @@ ok-fine from (compared case-insensitively); with no email configured, `human:` a
 > **Warning:** `--no-auth` (`AUTH_MODE=none`) disables authentication completely and gives every caller full admin
 > access. Keep `--host` on loopback. `--no-auth` refuses to start on a non-loopback `--host`/`HOST` (127.0.0.0/8, ::1, localhost) unless `ALLOW_UNAUTHENTICATED_NETWORK=true` is set.
 
+The read-only web UI is at `http://localhost:<port>/ui/`.
+
 # HTTP with Docker
 
 To run the container locally with authentication disabled behind a loopback port mapping, set `ALLOW_UNAUTHENTICATED_NETWORK=true` (since the container listens on `0.0.0.0`):

@@ -34,6 +34,7 @@ oauth:               # used only when auth.mode=oidc
   requiredGroups: []           # optional: restrict access to callers with these groups
   groupsClaim: ""              # optional: claim containing user groups (default: "groups")
   allowedClientIds: []         # optional: restrict access to specific OAuth client IDs (azp / client_id)
+  uiClientId: ""   # public client for the web UI (auth code + PKCE, redirect <publicBaseUrl>/ui/callback); empty = dynamic client registration
 git:
   branch: main
   remote:

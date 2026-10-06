@@ -19,6 +19,7 @@ message naming every bad variable.
 | `OAUTH_ALLOWED_CLIENT_IDS` | unset | Comma-separated list of allowed client IDs matched against `azp`, `client_id`, or `cid` (`oidc` mode only) |
 | `OAUTH_ALLOW_INSECURE_ISSUER` | `false` | Allow an `http://` issuer (development only, `oidc` mode only) |
 | `TRUST_PROXY` | `loopback,linklocal,uniquelocal` | Fastify trustProxy setting (`true`, `false`, hop count, or comma-separated CIDRs/keywords); affects logged client IP/protocol only |
+| `OAUTH_UI_CLIENT_ID` | unset | Public OAuth client the web UI signs in with (authorization code + PKCE, redirect `<PUBLIC_BASE_URL>/ui/callback`); unset = dynamic client registration when the provider supports it (`oidc` mode only) |
 | `PORT` | `8080` | |
 | `HOST` | `0.0.0.0` (container), `127.0.0.1` (`ok-fine serve`) | Loopback required when `AUTH_MODE=none` unless `ALLOW_UNAUTHENTICATED_NETWORK=true` |
 | `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |

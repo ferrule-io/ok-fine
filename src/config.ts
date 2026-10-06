@@ -26,6 +26,8 @@ export type AuthConfig =
       identityClaims: string[];
       allowInsecureIssuer: boolean;
       access: AccessPolicy;
+      /** Public OAuth client the web UI signs in with; unset = dynamic client registration. */
+      uiClientId?: string;
     };
 
 /** Settings the storage and service layers read; enough for the stdio transport. */
@@ -174,6 +176,7 @@ const httpEnvShape = {
   OAUTH_ALLOWED_CLIENT_IDS: z.string().optional(),
   ALLOW_UNAUTHENTICATED_NETWORK: z.string().optional(),
   TRUST_PROXY: z.string().optional(),
+  OAUTH_UI_CLIENT_ID: z.string().optional(),
 };
 
 function isValidGitRemoteUrl(url: string): boolean {
@@ -375,6 +378,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       .filter((s) => s.length > 0);
 
     const allowInsecureIssuer = raw.OAUTH_ALLOW_INSECURE_ISSUER === "true";
+    const uiClientId = raw.OAUTH_UI_CLIENT_ID?.trim();
 
     const groupsClaim =
       raw.OAUTH_GROUPS_CLAIM && raw.OAUTH_GROUPS_CLAIM.trim().length > 0 ? raw.OAUTH_GROUPS_CLAIM.trim() : "groups";
@@ -395,6 +399,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       identityClaims,
       allowInsecureIssuer,
       access,
+      ...(uiClientId ? { uiClientId } : {}),
     };
   }
 

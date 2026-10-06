@@ -7,11 +7,12 @@ Guidance for coding agents working on this repository. User-facing documentation
 ```sh
 mise install            # Node 24, pnpm 11
 pnpm install
-pnpm typecheck          # tsc --noEmit over src/, test/, agents/, vitest.config.ts
+pnpm typecheck          # tsc --noEmit over src/, test/, agents/, vitest.config.ts; then web/ (web/tsconfig.json)
 pnpm lint               # biome check (biome.json): lint, formatting, import order; warnings fail too
 pnpm format             # biome check --write: apply formatting, import order, and safe lint fixes
 pnpm test               # vitest: unit, service (real git), end-to-end
-pnpm build              # emits dist/
+pnpm build              # emits dist/ (server) and dist/ui (web UI, vite)
+pnpm dev:web            # vite dev server on :5173/ui/, proxying the API to a server on 127.0.0.1:8080
 pnpm exec vitest run src/service   # one suite
 ```
 
@@ -31,6 +32,7 @@ Dependencies point downward only:
 | Transport | `src/mcp/`, `src/http/` | Input validation (zod), permission checks, response shaping. |
 | Wiring | `src/server.ts` | `startServer(config)` (HTTP) and `startStdioServer(config, options)`. Shared by `src/main.ts` (container), `src/cli.ts` (npm bin), and `test/e2e.test.ts`; keep all wiring here. |
 | Auth | `src/auth/` | JWT resource server. ok-fine never issues tokens. |
+| Web UI | `web/` | Read-only SPA built into `dist/ui` and served from memory by `src/http/ui.ts`. Reads only through `/api/v1`; runtime code imports only types from `src/`. `web/src/auth/flow.ts` stays DOM-free (the e2e test runs it). |
 | Dev only | `src/dev/` | Unauthenticated token issuer for tests and local runs. Never wire it into the server. |
 | Agent package | `agents/` | Skills, SessionStart hook, pi/omp extension, harness manifests. Never imports from `src/`; mirrored to `ferrule-io/ok-fine-agents` on release, so edit here only. |
 | Docs | `wiki/` | GitHub wiki source; the `wiki` job in `release.yml` mirrors it to the repository wiki on release, so edit here only. Page titles come from file names; link between pages with full `https://github.com/ferrule-io/ok-fine/wiki/<Page>` URLs. |
