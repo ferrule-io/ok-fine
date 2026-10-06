@@ -29,13 +29,14 @@
   },
   "packageManager": "pnpm@11.22.0",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.build.json && vite build --config web/vite.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json",
     "lint": "biome check --error-on-warnings .",
     "format": "biome check --write .",
     "test": "vitest run",
     "start": "node dist/main.js",
-    "dev:issuer": "node dist/dev/issuer-cli.js"
+    "dev:issuer": "node dist/dev/issuer-cli.js",
+    "dev:web": "vite --config web/vite.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "^2.3.1",
@@ -50,9 +51,29 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
     "@modelcontextprotocol/client": "^2.3.1",
+    "@tailwindcss/typography": "^0.5.20",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.104.1",
     "@types/node": "^24.19.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
+    "dompurify": "^3.4.16",
+    "lucide-react": "^1.52.0",
+    "motion": "^14.0.0",
+    "oauth4webapi": "^3.8.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "react-router": "^8.4.0",
+    "shiki": "^4.5.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "~5.9.3",
+    "vite": "^8.3.2",
     "vitest": "^4.1.11"
   }
 }

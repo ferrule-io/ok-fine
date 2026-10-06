@@ -35,6 +35,7 @@ Other notable values:
 - `networkPolicy.*`
 - `oauth.audiences`
 - `oauth.jwksUri`
+- `oauth.uiClientId`: public client for the [web UI](https://github.com/ferrule-io/ok-fine/wiki/Authentication-and-Authorization#web-ui); empty = dynamic client registration
 - `extraEnv`
 
 See [`values.yaml`](https://github.com/ferrule-io/ok-fine/blob/main/charts/ok-fine/values.yaml) for the full list. `helm test okf` checks `/healthz`.

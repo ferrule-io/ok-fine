@@ -90,3 +90,5 @@ ok-fine from (compared case-insensitively); with no email configured, `human:` a
 
 > **Warning:** `--no-auth` (`AUTH_MODE=none`) disables authentication completely and gives every caller full admin
 > access. Keep `--host` on loopback.
+
+The read-only web UI is at `http://localhost:<port>/ui/`.

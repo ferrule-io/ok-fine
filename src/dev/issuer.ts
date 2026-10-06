@@ -1,3 +1,4 @@
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 
@@ -40,6 +41,34 @@ export async function startDevIssuer(options?: DevIssuerOptions): Promise<DevIss
 
   let boundPort = port;
   let resolvedIssuerUrl = options?.issuerUrl ?? "";
+  const authorizationCodes = new Map<
+    string,
+    {
+      clientId: string;
+      redirectUri: string;
+      codeChallenge: string;
+      scope: string;
+      username: string;
+      resource?: string;
+      expiresAt: number;
+    }
+  >();
+
+  const sendJson = (res: ServerResponse, status: number, body: unknown) => {
+    res.writeHead(status, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Access-Control-Allow-Origin": "*",
+    });
+    res.end(JSON.stringify(body));
+  };
+
+  const readBody = async (req: IncomingMessage) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) {
+      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    }
+    return Buffer.concat(chunks).toString("utf-8");
+  };
 
   async function mintToken(opts?: MintTokenOptions): Promise<string> {
     const scope = opts?.scope ?? "okf:read okf:write okf:admin";
@@ -99,10 +128,11 @@ export async function startDevIssuer(options?: DevIssuerOptions): Promise<DevIss
         token_endpoint: `${resolvedIssuerUrl}/token`,
         jwks_uri: `${resolvedIssuerUrl}/jwks`,
         response_types_supported: ["code"],
-        grant_types_supported: ["client_credentials"],
+        grant_types_supported: ["authorization_code", "client_credentials"],
         code_challenge_methods_supported: ["S256"],
         token_endpoint_auth_methods_supported: ["none"],
         scopes_supported: ["okf:read", "okf:write", "okf:admin"],
+        registration_endpoint: `${resolvedIssuerUrl}/register`,
       };
 
       res.writeHead(200, {
@@ -122,19 +152,105 @@ export async function startDevIssuer(options?: DevIssuerOptions): Promise<DevIss
       return;
     }
 
-    if (req.method === "POST" && pathname === "/token") {
-      const chunks: Buffer[] = [];
-      for await (const chunk of req) {
-        chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    // Browser sign-in: auto-approves every request (login_hint sets the username).
+    if (req.method === "GET" && pathname === "/authorize") {
+      const q = parsed.searchParams;
+      const clientId = q.get("client_id");
+      const redirectUri = q.get("redirect_uri");
+      const codeChallenge = q.get("code_challenge");
+      if (
+        q.get("response_type") !== "code" ||
+        !clientId ||
+        !redirectUri ||
+        !codeChallenge ||
+        q.get("code_challenge_method") !== "S256"
+      ) {
+        sendJson(res, 400, { error: "invalid_request" });
+        return;
       }
-      const bodyStr = Buffer.concat(chunks).toString("utf-8");
+      let target: URL;
+      try {
+        target = new URL(redirectUri);
+      } catch {
+        sendJson(res, 400, { error: "invalid_request" });
+        return;
+      }
+      const code = randomBytes(24).toString("base64url");
+      const resource = q.get("resource");
+      authorizationCodes.set(code, {
+        clientId,
+        redirectUri,
+        codeChallenge,
+        scope: q.get("scope") || "okf:read okf:write okf:admin",
+        username: q.get("login_hint") || "dev",
+        ...(resource ? { resource } : {}),
+        expiresAt: Date.now() + 60_000,
+      });
+      target.searchParams.set("code", code);
+      const state = q.get("state");
+      if (state !== null) target.searchParams.set("state", state);
+      res.writeHead(302, { Location: target.toString() });
+      res.end();
+      return;
+    }
 
+    if (req.method === "POST" && pathname === "/register") {
+      let metadata: unknown;
+      try {
+        metadata = JSON.parse(await readBody(req));
+      } catch {
+        sendJson(res, 400, { error: "invalid_client_metadata" });
+        return;
+      }
+      if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+        sendJson(res, 400, { error: "invalid_client_metadata" });
+        return;
+      }
+      sendJson(res, 201, {
+        ...metadata,
+        client_id: `dev-${randomUUID()}`,
+        client_id_issued_at: Math.floor(Date.now() / 1000),
+        token_endpoint_auth_method: "none",
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/token") {
+      const bodyStr = await readBody(req);
+
+      const contentType = req.headers["content-type"] ?? "";
+      const isJson = contentType.includes("application/json") || bodyStr.trim().startsWith("{");
+      if (!isJson) {
+        const form = new URLSearchParams(bodyStr);
+        if (form.get("grant_type") === "authorization_code") {
+          const code = form.get("code") ?? "";
+          const entry = authorizationCodes.get(code);
+          authorizationCodes.delete(code);
+          const verifier = form.get("code_verifier") ?? "";
+          if (
+            !entry ||
+            entry.expiresAt < Date.now() ||
+            form.get("client_id") !== entry.clientId ||
+            form.get("redirect_uri") !== entry.redirectUri ||
+            createHash("sha256").update(verifier).digest("base64url") !== entry.codeChallenge
+          ) {
+            sendJson(res, 400, { error: "invalid_grant" });
+            return;
+          }
+          const accessToken = await mintToken({
+            scope: entry.scope,
+            username: entry.username,
+            audience: entry.resource ?? defaultAudience,
+          });
+          sendJson(res, 200, { access_token: accessToken, token_type: "Bearer", expires_in: 3600, scope: entry.scope });
+          return;
+        }
+      }
       let scope = "okf:read okf:write okf:admin";
       let username = "dev";
 
       if (bodyStr.trim().length > 0) {
-        const contentType = req.headers["content-type"] ?? "";
-        if (contentType.includes("application/json") || bodyStr.trim().startsWith("{")) {
+        if (isJson) {
           try {
             const parsedJson = JSON.parse(bodyStr) as Record<string, unknown>;
             if (typeof parsedJson.scope === "string") scope = parsedJson.scope;

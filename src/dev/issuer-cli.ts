@@ -17,6 +17,9 @@ const issuer = await startDevIssuer({
 
 console.log(`Dev issuer running at: ${issuer.url}`);
 console.log(`Mint token example:\n  curl -s -X POST ${issuer.url}/token -d 'scope=okf:read okf:write' -d username=dev`);
+console.log(
+  `Browser sign-in: ${issuer.url}/authorize auto-approves (login_hint sets the username); set OAUTH_UI_CLIENT_ID to any value or leave it unset for /register`,
+);
 
 const shutdown = async () => {
   await issuer.close();

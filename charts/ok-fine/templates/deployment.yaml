@@ -97,6 +97,10 @@ spec:
               value: {{ join "," .Values.oauth.identityClaims | quote }}
             - name: OAUTH_ALLOW_INSECURE_ISSUER
               value: {{ .Values.oauth.allowInsecureIssuer | quote }}
+            {{- if .Values.oauth.uiClientId }}
+            - name: OAUTH_UI_CLIENT_ID
+              value: {{ .Values.oauth.uiClientId | quote }}
+            {{- end }}
             {{- end }}
             - name: GIT_BRANCH
               value: {{ .Values.git.branch | quote }}

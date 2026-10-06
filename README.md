@@ -9,6 +9,7 @@ from your own identity provider.
 - Every change is a git commit, attributed to the writing agent or human, with optional two-way sync to a remote.
 - Full-text keyword search (BM25), trust tiers (`unverified` → `machine-confirmed` → `human-reviewed`), staleness,
   link graph, and OKF conformance linting.
+- A read-only web UI at `/ui/` for browsing projects, concepts, links, history, and lint results.
 - Ships as an npm package (`npx @ferrule-io/ok-fine`), a container image, and a Helm chart.
 
 ## Quick start (local)
@@ -70,7 +71,7 @@ curl -s -X PUT localhost:8080/api/v1/projects/demo/concepts/tables/orders \
 curl -s "localhost:8080/api/v1/search?q=orders"
 ```
 
-Next, [connect an MCP client](https://github.com/ferrule-io/ok-fine/wiki/Connecting-an-MCP-Client) to `http://localhost:8080/mcp`.
+Browse it at http://localhost:8080/ui/. Next, [connect an MCP client](https://github.com/ferrule-io/ok-fine/wiki/Connecting-an-MCP-Client) to `http://localhost:8080/mcp`.
 
 ## Documentation
 

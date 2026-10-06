@@ -32,3 +32,8 @@ Unauthenticated endpoints: `GET /healthz` (always unauthenticated). In `oidc` mo
 `GET /.well-known/oauth-protected-resource[/mcp]` and `GET /.well-known/oauth-authorization-server` are also
 unauthenticated. In `none` mode, all MCP and API endpoints accept unauthenticated requests, and OAuth discovery
 routes are not registered (return 404).
+
+The web UI routes are also unauthenticated (they serve only static assets and public client settings): `GET /`
+redirects to `/ui/`, `GET /ui/config.json` returns `{ authMode, oauthClientId, scope, version }`, and `GET /ui/*`
+serves the built UI (unknown paths without a file extension return the app shell for client-side routing). They are
+absent when the server was built without `dist/ui`.

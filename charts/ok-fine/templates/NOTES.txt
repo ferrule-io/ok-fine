@@ -13,6 +13,9 @@ MCP endpoint:
 
 REST API:
   {{ include "ok-fine.publicBaseUrl" . }}/api/v1
+
+Web UI:
+  {{ include "ok-fine.publicBaseUrl" . }}/ui/
 {{- if eq .Values.auth.mode "oidc" }}
 
 OAuth metadata:
