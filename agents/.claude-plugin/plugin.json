@@ -1,7 +1,7 @@
 {
   "name": "ok-fine",
   "displayName": "ok-fine",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Use an ok-fine knowledge server as shared project memory: resolve the current repository's project, recall before work, record durable knowledge, onboard and review repositories.",
   "author": {
     "name": "ferrule-io"
