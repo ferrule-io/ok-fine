@@ -47,3 +47,12 @@ To configure your provider:
   derive `<id>` from the developer's `git config user.email`, so the token's `email` claim must carry that address.
 
 For exercising OIDC locally or running tests without an external provider, `src/dev/issuer.ts` (`node dist/dev/issuer-cli.js`) provides an unauthenticated token minter. **Never expose it in production.**
+
+# Local stdio
+
+The npm CLI's stdio mode (`npx -y @ferrule-io/ok-fine`, see
+[Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally)) has no authentication: the trust
+boundary is the local user account, and the client gets read, write, and admin permissions. Its identity is
+`git config user.email` in the directory the client launches ok-fine from, so `human:<that email>` actors are
+accepted (case-insensitively); without a configured email, `human:` actors are rejected. Commits carry
+`Okf-Principal: sub=local client=stdio`. `ok-fine serve --no-auth` is the same as `AUTH_MODE=none`.

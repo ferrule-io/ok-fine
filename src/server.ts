@@ -1,3 +1,4 @@
+import type { Readable, Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   type AuthInfo,
@@ -6,12 +7,13 @@ import {
   getOAuthProtectedResourceMetadataUrl,
   type OAuthMetadata,
 } from "@modelcontextprotocol/server";
+import { StdioServerTransport, serveStdio } from "@modelcontextprotocol/server/stdio";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 import { type DiscoveredAuthorizationServer, discoverAuthorizationServer } from "./auth/discovery.js";
 import { createAuthenticator } from "./auth/http-auth.js";
 import { JwtTokenVerifier, principalFromAuthInfo } from "./auth/verifier.js";
-import type { Config } from "./config.js";
+import type { Config, Logger, StorageConfig } from "./config.js";
 import { OkfError } from "./errors.js";
 import { registerMcpRoute } from "./http/mcp-route.js";
 import { registerRestRoutes } from "./http/rest.js";
@@ -212,31 +214,106 @@ export async function startServer(config: Config): Promise<RunningServer> {
 
   const address = await app.listen({ port: config.port, host: config.host });
 
-  let syncTimer: NodeJS.Timeout | undefined;
-  let stopped = false;
-  if (config.gitRemoteUrl && config.gitSyncIntervalSeconds > 0) {
-    const scheduleSync = (): void => {
-      syncTimer = setTimeout(async () => {
-        try {
-          await service.syncNow();
-        } catch (err) {
-          app.log.error({ err }, "periodic sync failed");
-        }
-        if (!stopped) scheduleSync();
-      }, config.gitSyncIntervalSeconds * 1000);
-    };
-    scheduleSync();
-  }
+  const stopSync = startPeriodicSync(config, service, app.log);
 
   return {
     app,
     url: address,
     close: async () => {
-      stopped = true;
-      clearTimeout(syncTimer);
+      stopSync();
       await app.close();
       await storage.close();
       await mcpHandler.close();
+    },
+  };
+}
+
+/** Runs `service.syncNow()` every GIT_SYNC_INTERVAL_SECONDS when a remote is configured; returns a stop function. */
+function startPeriodicSync(config: StorageConfig, service: KnowledgeService, log: Logger): () => void {
+  if (!config.gitRemoteUrl || config.gitSyncIntervalSeconds <= 0) return () => undefined;
+
+  let syncTimer: NodeJS.Timeout | undefined;
+  let stopped = false;
+  const scheduleSync = (): void => {
+    syncTimer = setTimeout(async () => {
+      try {
+        await service.syncNow();
+      } catch (err) {
+        log.error({ err }, "periodic sync failed");
+      }
+      if (!stopped) scheduleSync();
+    }, config.gitSyncIntervalSeconds * 1000);
+  };
+  scheduleSync();
+  return () => {
+    stopped = true;
+    clearTimeout(syncTimer);
+  };
+}
+
+export interface StdioServerOptions {
+  log: Logger;
+  /** Identity for `human:<id>` actors (the local git email); null rejects human actors. */
+  identity: string | null;
+  /** Defaults to process.stdin. */
+  stdin?: Readable;
+  /** Defaults to process.stdout. */
+  stdout?: Writable;
+}
+
+export interface RunningStdioServer {
+  /** Resolves when the client closes stdin. */
+  done: Promise<void>;
+  close(): Promise<void>;
+}
+
+/** Serves MCP over stdio to one local client with full permissions. Only the transport writes to stdout. */
+export async function startStdioServer(
+  config: StorageConfig,
+  options: StdioServerOptions,
+): Promise<RunningStdioServer> {
+  const { log } = options;
+  const stdin = options.stdin ?? process.stdin;
+  const stdout = options.stdout ?? process.stdout;
+
+  const storage = await GitBackend.open(config, log);
+  const catalog = new Catalog();
+  const service = new KnowledgeService({ config, storage, catalog, log });
+  await service.initialize();
+
+  const principal: Principal = {
+    subject: "local",
+    clientId: "stdio",
+    identity: options.identity,
+    scopes: [],
+    canRead: true,
+    canWrite: true,
+    canAdmin: true,
+  };
+
+  const stopSync = startPeriodicSync(config, service, log);
+
+  // serveStdio owns transport.onclose, so watch stdin directly.
+  const { promise: done, resolve } = Promise.withResolvers<void>();
+  stdin.once("end", resolve);
+  stdin.once("close", resolve);
+
+  const handle = serveStdio(() => createMcpServer(service, principal, log), {
+    transport: new StdioServerTransport(stdin, stdout),
+    onerror: (err) => log.error({ err }, "stdio transport error"),
+  });
+
+  let closing: Promise<void> | undefined;
+  return {
+    done,
+    close: () => {
+      closing ??= (async () => {
+        stopSync();
+        await handle.close();
+        // Waits for the storage mutex, so an in-flight write still commits.
+        await storage.close();
+      })();
+      return closing;
     },
   };
 }

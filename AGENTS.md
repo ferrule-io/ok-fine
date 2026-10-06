@@ -29,7 +29,7 @@ Dependencies point downward only:
 | Storage | `src/store/` | `StorageBackend` contract (`backend.ts`), its git implementation (`git-backend.ts`), bundle model, in-memory catalog/search, archives. |
 | Service | `src/service/knowledge-service.ts` | One method per operation. MCP and REST must both call this; never put business logic in transports. Depends only on `StorageBackend`: no repo paths or fs calls except import staging under `DATA_DIR/tmp`. |
 | Transport | `src/mcp/`, `src/http/` | Input validation (zod), permission checks, response shaping. |
-| Wiring | `src/server.ts` | `startServer(config)`. Shared by `src/main.ts` and `test/e2e.test.ts`; keep all wiring here. |
+| Wiring | `src/server.ts` | `startServer(config)` (HTTP) and `startStdioServer(config, options)`. Shared by `src/main.ts` (container), `src/cli.ts` (npm bin), and `test/e2e.test.ts`; keep all wiring here. |
 | Auth | `src/auth/` | JWT resource server. ok-fine never issues tokens. |
 | Dev only | `src/dev/` | Unauthenticated token issuer for tests and local runs. Never wire it into the server. |
 | Agent package | `agents/` | Skills, SessionStart hook, pi/omp extension, harness manifests. Never imports from `src/`; mirrored to `ferrule-io/ok-fine-agents` on release, so edit here only. |
@@ -64,6 +64,10 @@ Break any of these and you have a bug.
   Transports map them; don't invent per-transport error shapes.
 - **Single replica:** the design assumes one process per data volume (RWO PVC, in-process mutex). Don't add
   horizontal scaling without replacing the locking model.
+- **Stdio:** stdout carries only MCP JSON-RPC; the CLI logs to stderr. Never `console.log` in code reachable from
+  `startStdioServer`.
+- **Local CLI:** `lockDataDir` enforces one process per data dir; host git env (`gitHostEnv`) is CLI-only, so the
+  container keeps git isolated under `DATA_DIR/home`.
 - **Agent-facing text:** tool names and parameters referenced in `agents/` and `INSTRUCTIONS` (`src/mcp/server.ts`)
   must match the registered tools. Agent-facing text must never instruct writing files into a consumer codebase.
 
@@ -73,7 +77,8 @@ Break any of these and you have a bug.
   (`verbatimModuleSyntax`).
 - Strict mode with `noUncheckedIndexedAccess`. No `any`. Validate external input with zod; keep unchecked casts
   rare and commented.
-- Config comes only from `loadConfig(env)`. Don't read `process.env` elsewhere, because tests pass custom env.
+- Config comes only from `loadConfig`/`loadStorageConfig(env)`. Don't read `process.env` elsewhere (the entry points
+  `src/main.ts` and `src/cli.ts` pass it in), because tests pass custom env.
 - Keep the MCP tool table (`wiki/MCP-Tools.md`), REST route table (`wiki/REST-API.md`), and environment variable table (`wiki/Configuration.md`) in sync with the code.
 
 ## Tests

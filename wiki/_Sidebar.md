@@ -2,6 +2,7 @@
 
 - [Home](https://github.com/ferrule-io/ok-fine/wiki)
 - [Quick start](https://github.com/ferrule-io/ok-fine#quick-start-local)
+- [Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally)
 - [How it works](https://github.com/ferrule-io/ok-fine/wiki/How-It-Works)
 - [Connecting an MCP client](https://github.com/ferrule-io/ok-fine/wiki/Connecting-an-MCP-Client)
 - [Using ok-fine from coding agents](https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents)

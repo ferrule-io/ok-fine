@@ -392,6 +392,45 @@ jobs:
             git push origin "v${VERSION}"
           fi
 
+  npm:
+    name: Publish npm package
+    needs: [plan, release-commit]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - name: Set up mise
+        uses: jdx/mise-action@v5
+        with:
+          cache: true
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Publish to npm
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          IS_LATEST: ${{ needs.plan.outputs.is_latest }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm view "@ferrule-io/ok-fine@${VERSION}" version >/dev/null 2>&1; then
+            echo "@ferrule-io/ok-fine@${VERSION} already published"
+            exit 0
+          fi
+          tag="latest"
+          if [ "$IS_LATEST" != "true" ]; then tag="previous"; fi
+          npm publish --provenance --access public --tag "$tag"
+
   wiki:
     name: Publish wiki
     needs: [plan, release-commit]

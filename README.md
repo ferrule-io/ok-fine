@@ -2,20 +2,35 @@
 
 A knowledge repository for AI agents. ok-fine stores project knowledge as
 [Open Knowledge Format (OKF) v0.2](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
-bundles and serves it over **MCP** (Streamable HTTP) and a **REST JSON API**, protected by OAuth 2.1 bearer tokens
+bundles and serves it over **MCP** (stdio or Streamable HTTP) and a **REST JSON API**, protected by OAuth 2.1 bearer tokens
 from your own identity provider.
 
 - One OKF bundle per project; one markdown concept per file with YAML frontmatter.
 - Every change is a git commit, attributed to the writing agent or human, with optional two-way sync to a remote.
 - Full-text keyword search (BM25), trust tiers (`unverified` → `machine-confirmed` → `human-reviewed`), staleness,
   link graph, and OKF conformance linting.
-- Ships as a container image and a Helm chart.
+- Ships as an npm package (`npx @ferrule-io/ok-fine`), a container image, and a Helm chart.
 
 ## Quick start (local)
 
-Requires Docker, plus `curl` for the examples.
+Requires Node.js 24+ and git. Add ok-fine to Claude Code as a local stdio server (knowledge lives in `~/.ok-fine`):
 
-> **Warning:** `AUTH_MODE=none` disables authentication completely and gives every caller full admin access. Never expose it beyond localhost.
+```sh
+claude mcp add --scope user ok-fine -- npx -y @ferrule-io/ok-fine
+```
+
+Other harnesses: [Coding agents](https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents#local-setup-stdio). Git
+remotes, flags, and several concurrent sessions: [Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally).
+
+### HTTP server (REST + MCP)
+
+> **Warning:** `--no-auth` / `AUTH_MODE=none` disables authentication completely and gives every caller full admin access. Never expose it beyond localhost.
+
+```sh
+npx -y @ferrule-io/ok-fine serve --no-auth
+```
+
+Or with Docker (requires Docker):
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 -e AUTH_MODE=none -e PUBLIC_BASE_URL=http://localhost:8080 -v okf-data:/data ghcr.io/ferrule-io/ok-fine:latest
@@ -61,6 +76,7 @@ Next, [connect an MCP client](https://github.com/ferrule-io/ok-fine/wiki/Connect
 
 The [wiki](https://github.com/ferrule-io/ok-fine/wiki) covers everything else:
 
+- [Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally): npm CLI, stdio, flags, git credentials
 - [How it works](https://github.com/ferrule-io/ok-fine/wiki/How-It-Works): data layout, concepts, actors, trust tiers
 - [Connecting an MCP client](https://github.com/ferrule-io/ok-fine/wiki/Connecting-an-MCP-Client)
 - [Using ok-fine from coding agents](https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents): agent package, lifecycle, per-harness setup

@@ -1,4 +1,18 @@
-The MCP endpoint is `<PUBLIC_BASE_URL>/mcp`. It serves the `2026-07-28` protocol and the legacy `2025-11-25`,
+Locally, clients can start ok-fine themselves over stdio, with no server, URL, or authentication (see
+[Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally)):
+
+```json
+{
+  "mcpServers": {
+    "ok-fine": {
+      "command": "npx",
+      "args": ["-y", "@ferrule-io/ok-fine"]
+    }
+  }
+}
+```
+
+Over HTTP, the MCP endpoint is `<PUBLIC_BASE_URL>/mcp`. It serves the `2026-07-28` protocol and the legacy `2025-11-25`,
 `2025-06-18`, and `2025-03-26` protocols statelessly.
 
 When running with `AUTH_MODE=none`, no `Authorization` header or OAuth configuration is needed; point clients directly at `http://localhost:8080/mcp`:

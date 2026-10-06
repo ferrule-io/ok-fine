@@ -1,8 +1,8 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { chmod, copyFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
-import type { Config } from "../config.js";
+import type { StorageConfig } from "../config.js";
 import { pathExists } from "./fs-util.js";
 
 export class GitError extends Error {
@@ -27,25 +27,63 @@ export function isPushRejection(stderr: string): boolean {
   return stderr.includes("[rejected]") || stderr.includes("non-fast-forward") || stderr.includes("fetch first");
 }
 
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+// Inherited values would retarget or re-author ok-fine's own repository.
+const STRIPPED_HOST_GIT_ENV: Record<string, true> = {
+  GIT_ALTERNATE_OBJECT_DIRECTORIES: true,
+  GIT_CONFIG: true,
+  GIT_CONFIG_PARAMETERS: true,
+  GIT_CONFIG_COUNT: true,
+  GIT_OBJECT_DIRECTORY: true,
+  GIT_DIR: true,
+  GIT_WORK_TREE: true,
+  GIT_IMPLICIT_WORK_TREE: true,
+  GIT_GRAFT_FILE: true,
+  GIT_INDEX_FILE: true,
+  GIT_NO_REPLACE_OBJECTS: true,
+  GIT_REPLACE_REF_BASE: true,
+  GIT_PREFIX: true,
+  GIT_SHALLOW_FILE: true,
+  GIT_COMMON_DIR: true, // `git rev-parse --local-env-vars`
+  GIT_AUTHOR_NAME: true,
+  GIT_AUTHOR_EMAIL: true,
+  GIT_AUTHOR_DATE: true,
+  GIT_COMMITTER_NAME: true,
+  GIT_COMMITTER_EMAIL: true,
+  GIT_COMMITTER_DATE: true,
+};
+
 export class Git {
   readonly repoDir: string;
   readonly homeDir: string;
-  private readonly config: Config;
+  private readonly config: StorageConfig;
   private readonly env: Record<string, string>;
   private readonly baseArgs: string[];
 
-  constructor(repoDir: string, homeDir: string, config: Config) {
+  constructor(repoDir: string, homeDir: string, config: StorageConfig) {
     this.repoDir = repoDir;
     this.homeDir = homeDir;
     this.config = config;
 
-    this.env = {
-      PATH: process.env.PATH ?? "",
-      HOME: homeDir,
-      GIT_CONFIG_NOSYSTEM: "1",
-      GIT_TERMINAL_PROMPT: "0",
-      LC_ALL: "C",
-    };
+    if (config.gitHostEnv) {
+      // No HOME override and no GIT_CONFIG_NOSYSTEM: macOS osxkeychain lives in the system config.
+      this.env = {
+        ...Object.fromEntries(
+          Object.entries(config.gitHostEnv).filter(([k]) => !Object.hasOwn(STRIPPED_HOST_GIT_ENV, k)),
+        ),
+        GIT_TERMINAL_PROMPT: "0",
+        LC_ALL: "C",
+      };
+    } else {
+      this.env = {
+        PATH: process.env.PATH ?? "",
+        HOME: homeDir,
+        GIT_CONFIG_NOSYSTEM: "1",
+        GIT_TERMINAL_PROMPT: "0",
+        LC_ALL: "C",
+      };
+    }
 
     if (config.gitHttpUsername) {
       this.env.GIT_HTTP_USERNAME = config.gitHttpUsername;
@@ -65,6 +103,17 @@ export class Git {
       "user.name=ok-fine",
       "-c",
       "user.email=ok-fine@localhost",
+      // Host git config must not run user hooks, drop files, convert line endings, or change parsed output.
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "core.excludesFile=/dev/null",
+      "-c",
+      "core.attributesFile=/dev/null",
+      "-c",
+      "core.autocrlf=false",
+      "-c",
+      "log.showSignature=false",
     ];
 
     if (config.gitHttpUsername && config.gitHttpPassword) {
@@ -111,30 +160,52 @@ export class Git {
     }>();
 
     const allArgs = [...this.baseArgs, ...args];
-    const child = execFile(
-      "git",
-      allArgs,
-      {
-        cwd: this.repoDir,
-        env: this.env,
-        maxBuffer: 64 * 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        const stdoutStr = Buffer.isBuffer(stdout) ? stdout.toString("utf8") : String(stdout ?? "");
-        const stderrStr = Buffer.isBuffer(stderr) ? stderr.toString("utf8") : String(stderr ?? "");
-        const code = child.exitCode ?? (error ? 1 : 0);
+    // spawn, not execFile: execFile does not forward `detached`.
+    const child = spawn("git", allArgs, {
+      cwd: this.repoDir,
+      env: this.env,
+      stdio: ["pipe", "pipe", "pipe"],
+      // Own session, no controlling terminal: ssh/credential prompts fail instead of taking over the MCP client's terminal.
+      detached: true,
+    });
 
-        if (error && !opts?.allowFail) {
-          reject(new GitError(args, code, stderrStr));
-        } else {
-          resolve({ code, stdout: stdoutStr, stderr: stderrStr });
-        }
-      },
-    );
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let outputBytes = 0;
+    let overflow = false;
+    const collect = (chunks: Buffer[]) => (chunk: Buffer) => {
+      outputBytes += chunk.length;
+      if (outputBytes > MAX_OUTPUT_BYTES) {
+        overflow = true;
+        child.kill();
+        return;
+      }
+      chunks.push(chunk);
+    };
+    child.stdout.on("data", collect(stdoutChunks));
+    child.stderr.on("data", collect(stderrChunks));
 
-    if (opts?.stdin != null && child.stdin) {
-      child.stdin.end(opts.stdin);
-    }
+    let settled = false;
+    const settle = (code: number, failed: boolean, extraStderr = ""): void => {
+      if (settled) return;
+      settled = true;
+      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+      const stderr = Buffer.concat(stderrChunks).toString("utf8") + extraStderr;
+      if (failed && !opts?.allowFail) {
+        reject(new GitError(args, code, stderr));
+      } else {
+        resolve({ code, stdout, stderr });
+      }
+    };
+    child.on("error", (err) => settle(1, true, err.message));
+    child.on("close", (code) => {
+      if (overflow) settle(1, true, "\noutput exceeded the 64 MiB limit");
+      else settle(code ?? 1, code !== 0);
+    });
+
+    // EPIPE when git exits without reading stdin surfaces through the exit code.
+    child.stdin.on("error", () => undefined);
+    child.stdin.end(opts?.stdin);
 
     return promise;
   }
@@ -145,6 +216,8 @@ export class Git {
       cwd: this.repoDir,
       env: this.env,
       stdio: ["ignore", "pipe", "pipe"],
+      // Own session, no controlling terminal: ssh/credential prompts fail instead of taking over the MCP client's terminal.
+      detached: true,
     });
 
     let stderrBuffer = "";

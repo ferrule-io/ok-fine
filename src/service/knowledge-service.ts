@@ -3,7 +3,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { Readable } from "node:stream";
 import type { Document } from "yaml";
-import type { Config, Logger } from "../config.js";
+import type { Logger, StorageConfig } from "../config.js";
 import { OkfError } from "../errors.js";
 import { type ConceptRecord, parseConcept } from "../okf/concept.js";
 import {
@@ -147,12 +147,12 @@ export interface DeleteFileResult {
 }
 
 export class KnowledgeService {
-  readonly config: Config;
+  readonly config: StorageConfig;
   readonly storage: StorageBackend;
   readonly catalog: Catalog;
   readonly log: Logger;
 
-  constructor(opts: { config: Config; storage: StorageBackend; catalog: Catalog; log: Logger }) {
+  constructor(opts: { config: StorageConfig; storage: StorageBackend; catalog: Catalog; log: Logger }) {
     this.config = opts.config;
     this.storage = opts.storage;
     this.catalog = opts.catalog;

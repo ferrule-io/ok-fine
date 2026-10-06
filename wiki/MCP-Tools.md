@@ -1,4 +1,4 @@
-A client only sees the tools its token's scopes allow.
+A client only sees the tools its token's scopes allow. Over stdio, every tool is available.
 
 | Tool | Scope | Purpose |
 |---|---|---|

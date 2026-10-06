@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { Readable } from "node:stream";
-import type { Config, Logger } from "../config.js";
+import type { Logger, StorageConfig } from "../config.js";
 import { OkfError } from "../errors.js";
 import { nowIso } from "../okf/frontmatter.js";
 import { PROJECT_RE } from "../okf/paths.js";
@@ -95,7 +95,7 @@ class GitTx implements StorageTx {
 }
 
 export class GitBackend implements StorageBackend {
-  readonly config: Config;
+  readonly config: StorageConfig;
   readonly log: Logger;
   readonly repoDir: string;
   readonly homeDir: string;
@@ -107,7 +107,7 @@ export class GitBackend implements StorageBackend {
   private lastSyncAt: string | null = null;
   private lastError: string | null = null;
 
-  constructor(config: Config, log: Logger, repoDir: string, homeDir: string) {
+  constructor(config: StorageConfig, log: Logger, repoDir: string, homeDir: string) {
     this.config = config;
     this.log = log;
     this.repoDir = repoDir;
@@ -190,7 +190,7 @@ export class GitBackend implements StorageBackend {
     }
   }
 
-  static async open(config: Config, log: Logger): Promise<GitBackend> {
+  static async open(config: StorageConfig, log: Logger): Promise<GitBackend> {
     const repoDir = join(config.dataDir, "repo");
     const homeDir = join(config.dataDir, "home");
 

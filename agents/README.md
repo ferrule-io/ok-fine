@@ -14,6 +14,24 @@ full lifecycle and identity-provider requirements.
 
 ## Setup
 
+### Local (no server)
+
+Each harness starts ok-fine itself from npm (Node.js 24+ and git required); knowledge lives in `~/.ok-fine`. Install
+the package as in the shared-server table below, skip the login, and add the server:
+
+| Harness | Add server |
+|---|---|
+| Claude Code | `claude mcp add --scope user ok-fine -- npx -y @ferrule-io/ok-fine` |
+| Codex CLI | `codex mcp add ok-fine -- npx -y @ferrule-io/ok-fine` |
+| Gemini CLI | `~/.gemini/settings.json`: `{"mcpServers":{"ok-fine":{"command":"npx","args":["-y","@ferrule-io/ok-fine"]}}}` |
+| pi | `~/.pi/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"command":"npx","args":["-y","@ferrule-io/ok-fine"],"exposure":"direct"}}}` |
+| omp | `~/.omp/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"type":"stdio","command":"npx","args":["-y","@ferrule-io/ok-fine"]}}}` |
+
+Git remotes, flags, and concurrent sessions:
+[Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally).
+
+### Shared server
+
 Replace `https://okf.example.com` with your ok-fine server's `PUBLIC_BASE_URL`.
 
 | Harness | Install package | Add server | Log in |

@@ -2,14 +2,15 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import * as tar from "tar";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, loadStorageConfig } from "../src/config.js";
 import { type DevIssuer, startDevIssuer } from "../src/dev/issuer.js";
-import { type RunningServer, startServer } from "../src/server.js";
+import { type RunningServer, type RunningStdioServer, startServer, startStdioServer } from "../src/server.js";
 
 const PUBLIC = "http://okf.test";
 
@@ -278,5 +279,59 @@ describe("ok-fine with AUTH_MODE=none", () => {
   it("returns 404 for oauth-protected-resource endpoint", async () => {
     const res = await fetch(`${noneServer.url}/.well-known/oauth-protected-resource/mcp`);
     expect(res.status).toBe(404);
+  });
+});
+
+describe("ok-fine over stdio", () => {
+  const silent = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+  const clientToServer = new PassThrough();
+  const serverToClient = new PassThrough();
+  let stdioServer: RunningStdioServer;
+  let stdioDataDir: string;
+  let client: Client;
+
+  beforeAll(async () => {
+    stdioDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "okf-"));
+    stdioServer = await startStdioServer(loadStorageConfig({ DATA_DIR: stdioDataDir, LOG_LEVEL: "silent" }), {
+      log: silent,
+      identity: "dev@example.com",
+      stdin: clientToServer,
+      stdout: serverToClient,
+    });
+    client = new Client({ name: "e2e-stdio", version: "1.0.0" });
+    // NDJSON framing is symmetric, and the SDK's client stdio transport only spawns processes.
+    await client.connect(new StdioServerTransport(serverToClient, clientToServer));
+  });
+
+  afterAll(async () => {
+    await stdioServer?.close();
+    if (stdioDataDir) await fs.rm(stdioDataDir, { recursive: true, force: true });
+  });
+
+  it("serves every tool and binds human actors to the local git identity", async () => {
+    const { tools } = await client.listTools();
+    expect(tools.map((t) => t.name).sort()).toEqual(ALL_TOOLS);
+
+    const created = await call(client, "create_project", {
+      project: "local",
+      title: "Local",
+      actor: "human:dev@example.com",
+    });
+    expect(created.isError).toBeFalsy();
+
+    const forged = await call<{ error: { code: string; message: string } }>(client, "create_project", {
+      project: "other",
+      title: "Other",
+      actor: "human:other@example.com",
+    });
+    expect(forged.isError).toBe(true);
+    expect(forged.structuredContent.error.code).toBe("forbidden_actor");
+    expect(forged.structuredContent.error.message).toBe("this token may only act as human:dev@example.com");
+  });
+
+  it("finishes when the client closes stdin", async () => {
+    clientToServer.end();
+    await stdioServer.done;
+    await stdioServer.close();
   });
 });

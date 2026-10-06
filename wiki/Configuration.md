@@ -1,9 +1,10 @@
-All configuration is via environment variables. Invalid values stop startup with a message naming every bad
-variable.
+All configuration is via environment variables; the `ok-fine` npm CLI also takes flags for the common ones (see
+[Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally)). Invalid values stop startup with a
+message naming every bad variable.
 
 | Variable | Default | Description |
 |---|---|---|
-| `PUBLIC_BASE_URL` | **required** | External URL, e.g. `https://okf.example.com`. Used in OAuth metadata. |
+| `PUBLIC_BASE_URL` | **required** (container); `http://localhost:<PORT>` (`ok-fine serve`) | External URL, e.g. `https://okf.example.com`. Used in OAuth metadata. |
 | `AUTH_MODE` | `oidc` | Authentication mode: `oidc` or `none` |
 | `OAUTH_ISSUER` | required when `AUTH_MODE=oidc` | Must equal the token `iss` exactly (`oidc` mode only) |
 | `OAUTH_AUDIENCE` | `<PUBLIC_BASE_URL>/mcp` | Comma-separated accepted audiences (`oidc` mode only) |
@@ -12,9 +13,9 @@ variable.
 | `OAUTH_IDENTITY_CLAIMS` | `email,preferred_username,sub` | Claims tried in order for `human:<id>` binding (`oidc` mode only) |
 | `OAUTH_ALLOW_INSECURE_ISSUER` | `false` | Allow an `http://` issuer (development only, `oidc` mode only) |
 | `PORT` | `8080` | |
-| `HOST` | `0.0.0.0` | |
+| `HOST` | `0.0.0.0` (container), `127.0.0.1` (`ok-fine serve`) | |
 | `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
-| `DATA_DIR` | `/data` | Absolute path for the repo and working files |
+| `DATA_DIR` | `/data` (container), `~/.ok-fine` (CLI) | Absolute path for the repo and working files |
 | `GIT_BRANCH` | `main` | |
 | `GIT_REMOTE_URL` | unset | SSH/HTTPS URL or local path; unset keeps history on disk only |
 | `GIT_SYNC_INTERVAL_SECONDS` | `60` | Periodic sync; `0` disables |
@@ -24,3 +25,7 @@ variable.
 | `MAX_FILE_BYTES` | `1048576` | Max size of one concept or file |
 | `MAX_ARCHIVE_BYTES` | `52428800` | Max compressed archive upload |
 | `DEFAULT_STALE_AFTER_DAYS` | unset | Opt-in; stamps `stale_after` = now + N days on `write_concept` when omitted; producer value wins |
+
+Over stdio (`ok-fine` with no command), only `LOG_LEVEL`, `DATA_DIR`, `GIT_*`, `MAX_*`, and
+`DEFAULT_STALE_AFTER_DAYS` apply. The CLI (stdio and `ok-fine serve`) runs git with your environment and
+credentials; the container isolates git under `DATA_DIR/home`.
