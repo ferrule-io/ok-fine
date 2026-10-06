@@ -70,6 +70,10 @@ spec:
               value: {{ .Values.config.maxFileBytes | int | quote }}
             - name: MAX_ARCHIVE_BYTES
               value: {{ .Values.config.maxArchiveBytes | int | quote }}
+            {{- with .Values.config.defaultStaleAfterDays }}
+            - name: DEFAULT_STALE_AFTER_DAYS
+              value: {{ . | int | quote }}
+            {{- end }}
             - name: AUTH_MODE
               value: {{ .Values.auth.mode | quote }}
             {{- if eq .Values.auth.mode "oidc" }}

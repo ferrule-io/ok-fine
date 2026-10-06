@@ -39,6 +39,7 @@ export interface Config {
   gitHttpPassword?: string;
   maxFileBytes: number;
   maxArchiveBytes: number;
+  defaultStaleAfterDays?: number;
 }
 
 /** A whole-string decimal integer env var (rejects `8080junk`, `1x`, `1.5`, and blanks). */
@@ -49,6 +50,22 @@ function intEnv(name: string, fallback: string, min: number, max = Number.MAX_SA
     .refine((v) => /^\d+$/.test(v), { message: `${name} must be a whole decimal integer` })
     .transform(Number)
     .pipe(z.number().int().min(min, `${name} must be >= ${min}`).max(max, `${name} must be <= ${max}`));
+}
+
+/** An optional whole-string decimal integer env var; unset or empty string evaluates to undefined. */
+function optionalIntEnv(name: string, min: number, max = Number.MAX_SAFE_INTEGER) {
+  return z
+    .string()
+    .optional()
+    .transform((v) => (v === undefined || v === "" ? undefined : v))
+    .pipe(
+      z
+        .string()
+        .refine((v) => /^\d+$/.test(v), { message: `${name} must be a whole decimal integer` })
+        .transform(Number)
+        .pipe(z.number().int().min(min, `${name} must be >= ${min}`).max(max, `${name} must be <= ${max}`))
+        .optional(),
+    );
 }
 
 function httpUrl(value: string): boolean {
@@ -90,6 +107,7 @@ const rawEnvSchema = z
     GIT_HTTP_PASSWORD: z.string().optional(),
     MAX_FILE_BYTES: intEnv("MAX_FILE_BYTES", "1048576", 1),
     MAX_ARCHIVE_BYTES: intEnv("MAX_ARCHIVE_BYTES", "52428800", 1),
+    DEFAULT_STALE_AFTER_DAYS: optionalIntEnv("DEFAULT_STALE_AFTER_DAYS", 1, 36500),
   })
   .superRefine(
     (data, ctx) => {
@@ -201,5 +219,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     gitHttpPassword: raw.GIT_HTTP_PASSWORD,
     maxFileBytes: raw.MAX_FILE_BYTES,
     maxArchiveBytes: raw.MAX_ARCHIVE_BYTES,
+    defaultStaleAfterDays: raw.DEFAULT_STALE_AFTER_DAYS,
   };
 }

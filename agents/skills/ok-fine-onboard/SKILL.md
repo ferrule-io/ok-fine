@@ -75,6 +75,7 @@ Read repository files to extract project context. Never create or edit files in 
 2. Write initial concepts in the following order:
    - Pass `expectedRevision: null` (except for `overview`, where `expectedRevision` is passed).
    - Pass `actor: <harness>/<model>`.
+   - Set `stale_after` = now + 180 days (ISO 8601 with explicit offset, e.g. `2027-04-03T00:00:00Z`) on every concept written (including the `overview` update in this step).
    - Include `sources` with `id`, `resource` (`<normalized repository>/<path>`), and `commit` (`git rev-parse HEAD`).
    - Use `status: draft` unless a source explicitly confirms the fact.
    - Never record secrets, tokens, credentials, or personal data.

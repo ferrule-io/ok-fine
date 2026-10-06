@@ -765,4 +765,104 @@ title: Remote X
     expect(service.catalog.get("target", "tables/customers")).toBeDefined();
     expect(await readdir(join(service.config.dataDir, "tmp"))).toEqual([]);
   });
+
+  it("defaultStaleAfterDays: stamps stale_after on create/update when omitted, preserves explicit values, does nothing when unset", async () => {
+    // 1. With defaultStaleAfterDays set
+    const { service: configuredService } = await setupService({ DEFAULT_STALE_AFTER_DAYS: "30" });
+    await configuredService.createProject(alice, {
+      project: "proj-configured",
+      title: "Configured",
+      actor: "human:alice",
+    });
+
+    const beforeWrite = Date.now();
+    // (a) creating a concept without stale_after yields a stale_after ≈ now + N days
+    await configuredService.writeConcept(alice, {
+      project: "proj-configured",
+      id: "concepts/auto-stale",
+      frontmatter: { type: "Convention", title: "Auto Stale Concept" },
+      body: "Body content",
+      actor: "agent/1.0",
+    });
+    const afterWrite = Date.now();
+
+    const autoView = await configuredService.readConcept("proj-configured", "concepts/auto-stale");
+    const autoStaleAfter = autoView.frontmatter?.stale_after;
+    expect(typeof autoStaleAfter).toBe("string");
+    const parsedAuto = typeof autoStaleAfter === "string" ? Date.parse(autoStaleAfter) : Number.NaN;
+    expect(Number.isNaN(parsedAuto)).toBe(false);
+    const expectedMin = beforeWrite + 30 * 86_400_000;
+    const expectedMax = afterWrite + 30 * 86_400_000;
+    expect(parsedAuto).toBeGreaterThanOrEqual(expectedMin - 2000);
+    expect(parsedAuto).toBeLessThanOrEqual(expectedMax + 2000);
+    expect(autoView.derived?.staleAfter).toBe(autoStaleAfter);
+    expect(autoView.derived?.stale).toBe(false);
+
+    // An explicit null is a producer value and is not replaced
+    await configuredService.writeConcept(alice, {
+      project: "proj-configured",
+      id: "concepts/null-stale",
+      frontmatter: { type: "Convention", title: "Null Stale Concept", stale_after: null },
+      body: "Body content",
+      actor: "agent/1.0",
+    });
+    const nullView = await configuredService.readConcept("proj-configured", "concepts/null-stale");
+    expect(nullView.frontmatter?.stale_after).toBeNull();
+    expect(nullView.derived?.staleAfter).toBeNull();
+
+    // (b) an explicit stale_after is kept unchanged
+    const explicitTimestamp = "2030-01-01T00:00:00Z";
+    await configuredService.writeConcept(alice, {
+      project: "proj-configured",
+      id: "concepts/explicit-stale",
+      frontmatter: { type: "Convention", title: "Explicit Stale Concept", stale_after: explicitTimestamp },
+      body: "Body content",
+      actor: "agent/1.0",
+    });
+    const explicitView = await configuredService.readConcept("proj-configured", "concepts/explicit-stale");
+    expect(explicitView.frontmatter?.stale_after).toBe(explicitTimestamp);
+    expect(explicitView.derived?.staleAfter).toBe(explicitTimestamp);
+
+    // Caller's object is not mutated
+    const originalFm = { type: "Convention", title: "Immutable Test" };
+    await configuredService.writeConcept(alice, {
+      project: "proj-configured",
+      id: "concepts/immutable-test",
+      frontmatter: originalFm,
+      body: "Body content",
+      actor: "agent/1.0",
+    });
+    expect("stale_after" in originalFm).toBe(false);
+
+    // Updating a concept without stale_after when defaultStaleAfterDays is set stamps it
+    await configuredService.writeConcept(alice, {
+      project: "proj-configured",
+      id: "concepts/explicit-stale",
+      frontmatter: { type: "Convention", title: "Updated Concept Without Stale After" },
+      body: "Updated body",
+      actor: "agent/1.0",
+      expectedRevision: explicitView.revision,
+    });
+    const updatedView = await configuredService.readConcept("proj-configured", "concepts/explicit-stale");
+    expect(updatedView.frontmatter?.stale_after).not.toBe(explicitTimestamp);
+    const updatedStaleAfter = updatedView.frontmatter?.stale_after;
+    expect(typeof updatedStaleAfter).toBe("string");
+    const parsedUpdated = typeof updatedStaleAfter === "string" ? Date.parse(updatedStaleAfter) : Number.NaN;
+    expect(Number.isNaN(parsedUpdated)).toBe(false);
+
+    // 2. (c) with it unset, no stale_after is added
+    const { service: unconfiguredService } = await setupService();
+    await unconfiguredService.createProject(alice, { project: "proj-unset", title: "Unset", actor: "human:alice" });
+
+    await unconfiguredService.writeConcept(alice, {
+      project: "proj-unset",
+      id: "concepts/no-stale",
+      frontmatter: { type: "Convention", title: "No Stale Concept" },
+      body: "Body content",
+      actor: "agent/1.0",
+    });
+    const unconfiguredView = await unconfiguredService.readConcept("proj-unset", "concepts/no-stale");
+    expect(unconfiguredView.frontmatter?.stale_after).toBeUndefined();
+    expect(unconfiguredView.derived?.staleAfter).toBeNull();
+  });
 });

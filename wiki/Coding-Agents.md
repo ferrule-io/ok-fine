@@ -18,9 +18,9 @@ The agent package is built from [`agents/`](https://github.com/ferrule-io/ok-fin
 |---|---|---|
 | 1. Org setup | Once per org | Deploy ok-fine and configure the identity provider (below). |
 | 2. Developer setup | Once per developer per harness | Install the package, add a user-scope MCP server named `ok-fine`, and log in with the harness's OAuth flow. |
-| 3. Repository onboarding | Once per codebase, by anyone with `okf:write` | Ask the agent to "onboard this repository to ok-fine". The `ok-fine-onboard` skill creates or picks the project, adds the git remote to the overview's `repositories`, and bootstraps up to 30 concepts. The codebase is untouched. |
-| 4. Every session | Automatic | The hook/extension tells the agent the repository URL; server instructions and the `ok-fine` skill drive `list_projects(repository=…)`, recall (overview, index, search) before work, and capture of durable knowledge after. |
-| 5. Maintenance | On demand | Ask the agent to "review ok-fine knowledge". The `ok-fine-review` skill runs lint, finds stale, unverified, and drifted concepts (sources carry `commit`), updates or deprecates them, and records human verification only on explicit confirmation. |
+| 3. Repository onboarding | Once per codebase, by anyone with `okf:write` | Ask the agent to "onboard this repository to ok-fine". The `ok-fine-onboard` skill creates or picks the project, adds the git remote to the overview's `repositories`, and bootstraps up to 30 concepts, each with `sources[].commit` and a `stale_after` 180 days out. The codebase is untouched. |
+| 4. Every session | Automatic | The hook/extension tells the agent the repository URL; server instructions and the `ok-fine` skill drive `list_projects(repository=…)`, recall (overview, index, search) before work, and capture of durable knowledge after. On recall the agent checks each concept's code sources for drift since `sources[].commit`; a stale or drifted concept is re-checked against the code and, without asking the user, corrected if needed, refreshed (`commit` → HEAD, `stale_after` + 180 days), and agent-verified. |
+| 5. Maintenance | On demand | Ask the agent to "review ok-fine knowledge". The `ok-fine-review` skill runs lint, finds stale, unverified, drifted, and `stale_after`-less concepts, and refreshes and agent-verifies them without a human gate. Deprecations and deletions wait for confirmation; human verification is an optional correction step recorded only on explicit confirmation. |
 
 # Repository binding
 

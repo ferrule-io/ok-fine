@@ -15,6 +15,7 @@ config:
   logLevel: info
   maxFileBytes: 1048576
   maxArchiveBytes: 52428800
+  defaultStaleAfterDays: null  # opt-in: stamps stale_after = now + N days on write_concept when omitted
 auth:
   mode: oidc         # oidc (default) validates JWTs from oauth.issuer; none disables authentication entirely — every request gets admin access; local testing only, never expose
 oauth:               # used only when auth.mode=oidc

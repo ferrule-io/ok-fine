@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyFrontmatter, parseFrontmatter, serializeConcept, splitFrontmatter } from "./frontmatter.js";
+import { applyFrontmatter, isoAfterDays, parseFrontmatter, serializeConcept, splitFrontmatter } from "./frontmatter.js";
 import { type DirListing, renderIndex } from "./index-file.js";
 import { lintConceptFile, lintLogFile } from "./lint.js";
 import { prependLogEntry } from "./log-file.js";
@@ -255,6 +255,12 @@ def compute():
 `;
     const logIssues = lintLogFile("log.md", badLog);
     expect(logIssues.some((i) => i.code === "log_bad_date_heading")).toBe(true);
+  });
+
+  it("isoAfterDays calculates ISO 8601 UTC date offset by specified days", () => {
+    const fixed = new Date("2026-10-05T12:00:00Z");
+    expect(isoAfterDays(fixed, 180)).toBe("2027-04-03T12:00:00Z");
+    expect(isoAfterDays(fixed, 0)).toBe("2026-10-05T12:00:00Z");
   });
 });
 

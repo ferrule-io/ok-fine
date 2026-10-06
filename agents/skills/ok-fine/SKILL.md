@@ -1,6 +1,6 @@
 ---
 name: ok-fine
-description: "Shared project knowledge for the current codebase, stored in the ok-fine MCP server rather than in the repository. Use at the start of any non-trivial task in a git repository to find and read that repository's ok-fine project (architecture, decisions, conventions, runbooks), whenever the user asks what is known or was decided about this codebase, and before finishing a task to record durable knowledge you learned."
+description: "Shared project knowledge for the current codebase, stored in the ok-fine MCP server rather than in the repository. Use at the start of any non-trivial task in a git repository to find, read, and keep fresh that repository's ok-fine project (architecture, decisions, conventions, runbooks), whenever the user asks what is known or was decided about this codebase, and before finishing a task to record durable knowledge you learned."
 ---
 
 # ok-fine
@@ -21,10 +21,21 @@ Knowledge lives in ok-fine, never in repository files. Never write `AGENTS.md`, 
 1. Call `read_concept` with `project` and `id: "overview"`.
 2. Call `get_index` with `project` to inspect the root directory index.
 3. Call `search_concepts` with `project` and `query` set to key terms from the task. Read relevant matching concepts with `read_concept`.
-4. Follow the trust order: human-reviewed > machine-confirmed > unverified.
-   - Treat unverified and stale concepts as leads to check against the code.
-   - Treat deprecated concepts as historical context.
-5. When code contradicts a concept, trust the code. Complete the task using the code as source of truth, then update the concept.
+4. Run drift check on every concept read: for each `sources` entry with a `commit` and a `resource` matching `<normalized repository>/<path>` (normalized repository is the `repositories` value from `list_projects`, e.g. `github.com/acme/shop`):
+   - `git cat-file -e HEAD:<path>` fails → source moved or deleted (drifted).
+   - `git log --oneline <commit>..HEAD -- <path>` non-empty → source changed (drifted).
+   - Commit missing from local history (e.g. shallow clone) → drift unknown; treat as drifted (confirm against code).
+   A concept is fresh when it has a `stale_after`, is not `stale` (not past `stale_after`), and has no drifted sources. A concept without `stale_after` counts as stale.
+5. Follow recall ordering:
+   - Fresh, non-drifted concepts first; within those, trust tier (human-reviewed > machine-confirmed > unverified) as tiebreaker.
+   - Stale or drifted concepts: check against code and refresh regardless of trust tier.
+   - Deprecated concepts: historical context only.
+6. When code contradicts a concept, trust the code. Complete the task using the code as source of truth.
+7. Refresh stale or drifted concepts relied on for the task without asking the user (whether or not the body needed changes):
+   - Confirm against current code; if wrong, fix the body.
+   - Call `read_concept` to get the latest `revision`.
+   - Call `write_concept` with all existing frontmatter preserved (including unknown keys), every code source's `commit` set to `git rev-parse HEAD` (drop or replace sources whose file is gone), `stale_after` set to now + 180 days (ISO 8601 with explicit offset, e.g. `2027-04-03T00:00:00Z`), and `expectedRevision`.
+   - Call `verify_concept` with `actor: <harness>/<model>` and `expectedRevision` set to the revision returned by `write_concept`. (Never use `human:` for agent verifications.)
 
 ## 4. Record after working
 Before completing a non-trivial task, record durable knowledge discovered or decided during work.
@@ -59,7 +70,7 @@ Search before creating (`search_concepts` with `project` and `query`) to update 
 3. Frontmatter fields:
    - Set `type`, `title`, one-sentence `description`, `tags`, and `status`.
    - Use `status: draft` when knowledge is inferred rather than explicitly stated by a source.
-   - For volatile facts (versions, owners, endpoints, deploy targets), set `stale_after` to an ISO 8601 timestamp with offset 180 days in the future.
+   - Set `stale_after` on every concept you write (create or update) to now + 180 days (ISO 8601 timestamp with explicit offset, e.g. `2027-04-03T00:00:00Z`). Volatile facts (versions, owners, endpoints, deploy targets) may use a shorter horizon (e.g. 90 days).
 4. Sources:
    - Provide a `sources` array where each entry has a short slug `id`.
    - Code evidence: `resource` = `<normalized repository>/<path>` (normalized repository is the `repositories` value from `list_projects`, e.g. `github.com/acme/shop`), and `commit` = full commit hash from `git rev-parse HEAD`.
@@ -71,10 +82,12 @@ Search before creating (`search_concepts` with `project` and `query`) to update 
    - Pass `actor` as `<harness>/<model>` (e.g. `claude-code/claude-opus-4-5`, `codex/gpt-5-codex`, `gemini-cli/gemini-2.5-pro`, `pi/claude-3-7-sonnet`, `omp/gemini-2.5-pro`).
    - Replace any characters outside `A-Za-z0-9._:+-` with `-`.
    - If model is unavailable, pass `<harness>/unknown`. Never use `human:<id>` for agent writes.
-7. Message:
+7. Verification:
+   - After confirming a concept against current code (HEAD), an agent verification must refresh `sources[].commit` (to `git rev-parse HEAD`) and `stale_after` (to now + 180 days) first via `write_concept`, then call `verify_concept` with `actor: <harness>/<model>` and the returned `revision`, so the drift check stops firing.
+8. Message:
    - Pass a concise one-line `message` describing the edit.
-8. Deletion and deprecation:
+9. Deletion and deprecation:
    - Never write `index.md` or `log.md` (maintained by server).
    - Prefer deprecation (`status: deprecated` plus a successor link) over deletion.
-   - Call `delete_concept` with `project`, `id`, `actor`, and `expectedRevision` only on explicit user request.
-9. Inform the user which concepts changed.
+   - Only deletions and deprecations require explicit user confirmation. Call `delete_concept` with `project`, `id`, `actor`, and `expectedRevision` only on explicit user request.
+10. Inform the user which concepts changed.
