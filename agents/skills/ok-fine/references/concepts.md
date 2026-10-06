@@ -28,6 +28,33 @@ sources:
 
 ---
 
+## Proposal
+
+Use for designs and decisions for work on an unmerged branch or pull request.
+
+### Frontmatter Example
+```yaml
+type: Decision
+title: Add Distributed Caching Layer
+description: Proposed Redis-backed cache for reducing database read contention during checkout.
+status: draft
+proposal: { ref: https://github.com/acme/shop/pull/42 }
+tags: [caching, redis, performance]
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
+sources:
+  - id: cache-pr
+    resource: github.com/acme/shop/src/cache/redis.ts
+    commit: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+```
+
+### Body Headings
+- ## Context
+- ## Proposal
+- ## Rejected alternatives
+- ## Would change (bundle-absolute links to current-state concepts this proposal would modify, e.g. `[Order Service](/architecture/order-service.md)`)
+
+---
+
 ## Convention
 
 Use for coding standards, branching policies, naming schemes, and practices not enforced by linters.

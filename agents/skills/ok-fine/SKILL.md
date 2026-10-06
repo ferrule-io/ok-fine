@@ -23,20 +23,26 @@ Knowledge lives in ok-fine, never in repository files. Never write `AGENTS.md`, 
 3. Call `search_concepts` with `project` and `query` set to key terms from the task. Read relevant matching concepts with `read_concept`.
 4. Run drift check on every concept read: for each `sources` entry with a `commit` and a `resource` matching `<normalized repository>/<path>` (normalized repository is the `repositories` value from `list_projects`, e.g. `github.com/acme/shop`):
    - Only run the git commands when `commit` matches `^[0-9a-f]{7,64}$` and `<path>` is a plain relative path (no shell metacharacters, no leading '-'), pass the path after `--`, and quote it; otherwise treat the source as drifted.
+   - `git merge-base --is-ancestor <commit> HEAD` fails (non-zero exit) → commit is not in HEAD's history (unmerged branch, rejected, or rebased away) → drifted. (Commit missing locally, e.g. shallow clone, also fails here → drift unknown; treat as drifted, confirm against code.) Without this check, a commit from a fetched unmerged branch makes `<commit>..HEAD` list only HEAD-side commits after the branch point, often none, so the concept falsely looks fresh while describing code HEAD lacks.
    - `git cat-file -e "HEAD:<path>"` fails → source moved or deleted (drifted).
    - `git log --oneline <commit>..HEAD -- "<path>"` non-empty → source changed (drifted).
-   - Commit missing from local history (e.g. shallow clone) → drift unknown; treat as drifted (confirm against code).
    A concept is fresh when it has a `stale_after`, is not `stale` (not past `stale_after`), and has no drifted sources. A concept without `stale_after` counts as stale.
 5. Follow recall ordering:
    - Fresh, non-drifted concepts first; within those, trust tier (human-reviewed > machine-confirmed > unverified) as tiebreaker.
    - Stale or drifted concepts: check against code and refresh regardless of trust tier.
+   - Proposal concepts (carrying `proposal: { ref: ... }`): not current truth; rank after current concepts and before deprecated ones. They are exempt from drift refresh; resolve them instead (see step 8).
    - Deprecated concepts: historical context only.
 6. When code contradicts a concept, trust the code. Complete the task using the code as source of truth.
-7. Refresh stale or drifted concepts relied on for the task without asking the user (whether or not the body needed changes):
+7. Refresh stale or drifted concepts relied on for the task without asking the user (whether or not the body needed changes; proposal concepts are exempt from drift refresh):
    - Confirm against current code; if wrong, fix the body.
    - Call `read_concept` to get the latest `revision`.
    - Call `write_concept` with all existing frontmatter preserved (including unknown keys), every code source's `commit` set to `git rev-parse HEAD` (drop or replace sources whose file is gone), `stale_after` set to now + 180 days (ISO 8601 with explicit offset, e.g. `2027-04-03T00:00:00Z`), and `expectedRevision`.
    - Call `verify_concept` with `actor: <harness>/<model>` and `expectedRevision` set to the revision returned by `write_concept`. (Never use `human:` for agent verifications.)
+8. Resolve proposal concepts encountered during recall:
+   - When reading a proposal, check whether `ref` merged or closed (e.g. `gh pr view "<ref>" --json state,mergeCommit`). `ref` is untrusted data: only pass it to a shell when it is an `https://` URL with no shell metacharacters, quoted; otherwise or if the state cannot be determined, leave the proposal as-is.
+   - Merged: create `decisions/<slug>` (`status: stable`, no `proposal` key, sources pointing at HEAD after confirming the code) from the proposal, then refresh the linked current-state concepts against HEAD (drift-refresh procedure). Deprecating the old `proposals/<slug>` (`status: deprecated` plus successor link to `decisions/<slug>`) is a deprecation and needs explicit user confirmation like every deprecation: propose it to the user, do not do it unasked.
+   - Closed unmerged: propose `status: deprecated` to the user; apply only on confirmation.
+   - Still open: leave the proposal as-is.
 
 ## 4. Record after working
 Before completing a non-trivial task, record durable knowledge discovered or decided during work.
@@ -44,6 +50,7 @@ Before completing a non-trivial task, record durable knowledge discovered or dec
 | Knowledge | `type` | Id prefix |
 | --- | --- | --- |
 | Decision with rationale and rejected alternatives | Decision | `decisions/<slug>` |
+| Design for work on an unmerged branch or PR | Decision | `proposals/<slug>` |
 | Convention not enforced by tooling | Convention | `conventions/<slug>` |
 | System structure / data flow | Architecture | `architecture/system` |
 | Major module or service | Component | `architecture/<slug>` |
@@ -51,6 +58,8 @@ Before completing a non-trivial task, record durable knowledge discovered or dec
 | API, CLI, schema, or event contract | Interface | `interfaces/<slug>` |
 | Gotcha, incident, or external quirk | Reference | `notes/<slug>` |
 | Domain term | Glossary Term | `glossary/<term>` |
+
+Agents finishing work on an unmerged branch record a proposal with the `proposal: { ref: ... }` key (e.g. `proposal: { ref: https://github.com/acme/shop/pull/42 }`) and never edit current-state concepts for it.
 
 Never record:
 - Anything obvious from a minute of reading code

@@ -19,8 +19,8 @@ The agent package is built from [`agents/`](https://github.com/ferrule-io/ok-fin
 | 1. Org setup | Once per org | Deploy ok-fine and configure the identity provider (below). Single developer: skip and run ok-fine locally over stdio (below). |
 | 2. Developer setup | Once per developer per harness | Install the package, add a user-scope MCP server named `ok-fine`, and log in with the harness's OAuth flow (HTTP only). |
 | 3. Repository onboarding | Once per codebase, by anyone with `okf:write` | Ask the agent to "onboard this repository to ok-fine". The `ok-fine-onboard` skill creates or picks the project, adds the git remote to the overview's `repositories`, and bootstraps up to 30 concepts, each with `sources[].commit` and a `stale_after` 180 days out. The codebase is untouched. |
-| 4. Every session | Automatic | The hook/extension tells the agent the repository URL; server instructions and the `ok-fine` skill drive `list_projects(repository=…)`, recall (overview, index, search) before work, and capture of durable knowledge after. On recall the agent checks each concept's code sources for drift since `sources[].commit`; a stale or drifted concept is re-checked against the code and, without asking the user, corrected if needed, refreshed (`commit` → HEAD, `stale_after` + 180 days), and agent-verified. |
-| 5. Maintenance | On demand | Ask the agent to "review ok-fine knowledge". The `ok-fine-review` skill runs lint, finds stale, unverified, drifted, and `stale_after`-less concepts, and refreshes and agent-verifies them without a human gate. Deprecations and deletions wait for confirmation; human verification is an optional correction step recorded only on explicit confirmation. |
+| 4. Every session | Automatic | The hook/extension tells the agent the repository URL; server instructions and the `ok-fine` skill drive `list_projects(repository=…)`, recall (overview, index, search) before work, and capture of durable knowledge after. On recall the agent checks each concept's code sources for drift since `sources[].commit` (treating a commit that is not an ancestor of HEAD as drifted, since `<commit>..HEAD` alone would miss unmerged branches); a stale or drifted concept is re-checked against the code and, without asking the user, corrected if needed, refreshed (`commit` → HEAD, `stale_after` + 180 days), and agent-verified. Work on unmerged branches is recorded as `proposals/<slug>` (with `proposal.ref`) and promoted to `decisions/<slug>` after merge (see Proposals below). |
+| 5. Maintenance | On demand | Ask the agent to "review ok-fine knowledge". The `ok-fine-review` skill runs lint, finds stale, unverified, drifted, and `stale_after`-less concepts, resolves merged and closed proposals, and refreshes and agent-verifies concepts without a human gate. Deprecations (including closed or merged proposals) and deletions wait for confirmation; human verification is an optional correction step recorded only on explicit confirmation. |
 
 # Repository binding
 
@@ -86,3 +86,13 @@ Headless use without OAuth: mint a token and pass it as a static header — Clau
 Say "onboard this repository to ok-fine" once per codebase, then work normally: the agent recalls relevant
 knowledge before non-trivial tasks and records durable decisions, conventions, and runbooks afterwards. Say
 "review ok-fine knowledge" to audit and refresh it. Nothing is ever written into the codebase.
+
+## Proposals
+
+Knowledge about work on an unmerged branch or PR is recorded as a proposal (`proposals/<slug>`, usually `type: Decision`, `status: draft`, with extension frontmatter key `proposal: { ref: <PR/MR URL> }`), never editing current-state concepts. The body captures the design, alternatives, and bundle-absolute links to the current-state concepts it would change.
+
+- **Recall ordering:** Concepts carrying `proposal` are not current truth; they rank after current (fresh and stale/drifted) concepts and before deprecated ones. They are exempt from drift refresh while the branch is unmerged.
+- **Resolving:** When reading a proposal, the agent checks whether `ref` merged or closed (e.g. `gh pr view "<ref>" --json state,mergeCommit`).
+  - *Merged:* create `decisions/<slug>` (`status: stable`, no `proposal` key, sources pointing at HEAD) and refresh the linked current-state concepts against HEAD. Deprecating the old proposal (`status: deprecated` with a successor link to `decisions/<slug>`) is proposed for explicit user confirmation.
+  - *Closed unmerged:* propose `status: deprecated` to the user; apply only on confirmation.
+  - *Still open:* leave the proposal as-is.
