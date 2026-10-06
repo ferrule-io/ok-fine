@@ -113,4 +113,185 @@ describe("GitBackend", () => {
     expect(subjects).toContain("test");
     expect(subjects).toContain("okf: initialize knowledge repository");
   });
+
+  it("pushed root symlink to an outside dir with a file: projects() excludes it and readFile returns null", async () => {
+    const bare = join(dataDir, "remote.git");
+    execFileSync("git", ["init", "--bare", "-b", "main", bare]);
+
+    const ext = join(dataDir, "ext");
+    execFileSync("git", ["clone", bare, ext]);
+    execFileSync("git", ["checkout", "-b", "main"], { cwd: ext });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: ext });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: ext });
+
+    await mkdir(join(ext, "alpha"));
+    await writeFile(join(ext, "alpha", "index.md"), "# Alpha\n");
+
+    const outside = join(dataDir, "outside");
+    await mkdir(outside);
+    await writeFile(join(outside, "secret.txt"), "secret data");
+    await writeFile(join(outside, "id_okf"), "secret key");
+
+    await symlink(outside, join(ext, "leak"));
+    execFileSync("git", ["add", "-A"], { cwd: ext });
+    execFileSync("git", ["commit", "-m", "add alpha and leak symlink"], { cwd: ext });
+    execFileSync("git", ["push", "origin", "main"], { cwd: ext });
+
+    const config = loadStorageConfig({
+      DATA_DIR: join(dataDir, "storage-data"),
+      GIT_REMOTE_URL: bare,
+      LOG_LEVEL: "silent",
+    });
+    const storage = await GitBackend.open(config, log);
+
+    const projects = await storage.projects();
+    expect(projects).toContain("alpha");
+    expect(projects).not.toContain("leak");
+
+    expect(await storage.readFile("leak", "id_okf")).toBeNull();
+    expect(await storage.readFile("leak", "secret.txt")).toBeNull();
+    expect(await pathExists(join(outside, "index.md"))).toBe(false);
+
+    await storage.close();
+  });
+
+  it("pushed symlink alpha/g -> ../.git: tx write to g/x rejects and nothing appears in .git", async () => {
+    const bare = join(dataDir, "remote.git");
+    execFileSync("git", ["init", "--bare", "-b", "main", bare]);
+
+    const ext = join(dataDir, "ext");
+    execFileSync("git", ["clone", bare, ext]);
+    execFileSync("git", ["checkout", "-b", "main"], { cwd: ext });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: ext });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: ext });
+
+    await mkdir(join(ext, "alpha"));
+    await writeFile(join(ext, "alpha", "index.md"), "# Alpha\n");
+    await symlink("../.git", join(ext, "alpha", "g"));
+    execFileSync("git", ["add", "-A"], { cwd: ext });
+    execFileSync("git", ["commit", "-m", "add alpha with symlink g -> ../.git"], { cwd: ext });
+    execFileSync("git", ["push", "origin", "main"], { cwd: ext });
+
+    const config = loadStorageConfig({
+      DATA_DIR: join(dataDir, "storage-data"),
+      GIT_REMOTE_URL: bare,
+      LOG_LEVEL: "silent",
+    });
+    const storage = await GitBackend.open(config, log);
+
+    await expect(
+      storage.transaction({ projects: ["alpha"] }, async (tx) => {
+        await tx.writeFile("alpha", "g/x", "pwned\n");
+        return { value: null, commit };
+      }),
+    ).rejects.toThrow();
+
+    expect(await pathExists(join(storage.repoDir, ".git", "x"))).toBe(false);
+
+    await storage.close();
+  });
+
+  it("remote force-pushed to unrelated history: sync halts, does not push local commits or conflict branches", async () => {
+    const bare = join(dataDir, "remote.git");
+    execFileSync("git", ["init", "--bare", "-b", "main", bare]);
+
+    const ext = join(dataDir, "ext");
+    execFileSync("git", ["clone", bare, ext]);
+    execFileSync("git", ["checkout", "-b", "main"], { cwd: ext });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: ext });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: ext });
+
+    await mkdir(join(ext, "alpha"));
+    await writeFile(join(ext, "alpha", "a.md"), "# A\n");
+    execFileSync("git", ["add", "-A"], { cwd: ext });
+    execFileSync("git", ["commit", "-m", "initial commit"], { cwd: ext });
+    execFileSync("git", ["push", "origin", "main"], { cwd: ext });
+
+    const config = loadStorageConfig({
+      DATA_DIR: join(dataDir, "storage-data"),
+      GIT_REMOTE_URL: bare,
+      LOG_LEVEL: "silent",
+    });
+    const storage = await GitBackend.open(config, log);
+
+    // Initial sync / push from storage to ensure remote base is established
+    await storage.transaction({ projects: ["alpha"] }, async (tx) => {
+      await tx.writeFile("alpha", "b.md", "# B\n");
+      return { value: null, commit };
+    });
+
+    // Remote operator rewrites history (force-push orphan commit to main)
+    execFileSync("git", ["checkout", "--orphan", "scrubbed"], { cwd: ext });
+    await rm(join(ext, "alpha"), { recursive: true, force: true });
+    await writeFile(join(ext, "scrubbed.txt"), "clean history\n");
+    execFileSync("git", ["add", "-A"], { cwd: ext });
+    execFileSync("git", ["commit", "-m", "scrubbed history"], { cwd: ext });
+    execFileSync("git", ["push", "--force", "origin", "scrubbed:main"], { cwd: ext });
+
+    const remoteTipBefore = execFileSync("git", ["--git-dir", bare, "rev-parse", "main"]).toString("utf8").trim();
+
+    // Local commit on storage while remote has rewritten history
+    await storage.transaction({ projects: ["alpha"] }, async (tx) => {
+      await tx.writeFile("alpha", "local-secret.md", "# Local Secret\n");
+      return { value: null, commit };
+    });
+
+    const status = await storage.sync();
+
+    // 1. Remote tip unchanged
+    const remoteTipAfter = execFileSync("git", ["--git-dir", bare, "rev-parse", "main"]).toString("utf8").trim();
+    expect(remoteTipAfter).toBe(remoteTipBefore);
+
+    // 2. No conflict branches pushed to remote
+    const remoteBranches = execFileSync("git", ["--git-dir", bare, "branch", "--list", "*conflict*"])
+      .toString("utf8")
+      .trim();
+    expect(remoteBranches).toBe("");
+
+    // 3. syncStatus/lastError reports the halt
+    expect(status.lastError).toMatch(/remote history was rewritten; syncing halted/i);
+    const currentStatus = await storage.syncStatus();
+    expect(currentStatus.lastError).toMatch(/remote history was rewritten; syncing halted/i);
+
+    await storage.close();
+  });
+
+  it("deleteProject and replaceProject guard against a symlinked project dir", async () => {
+    const { storage } = await open();
+
+    const outside = join(dataDir, "outside-guard");
+    await mkdir(outside);
+    await writeFile(join(outside, "important.txt"), "keep me");
+
+    // Create a symlinked project root
+    await symlink(outside, join(storage.repoDir, "target-proj"));
+
+    // replaceProject removes the link and writes clean files, not writing through
+    await storage.transaction({ projects: ["target-proj"] }, async (tx) => {
+      await tx.replaceProject("target-proj", {
+        paths: ["note.md"],
+        read: async () => Buffer.from("# Replaced\n"),
+      });
+      return { value: null, commit };
+    });
+
+    expect(await pathExists(join(outside, "note.md"))).toBe(false);
+    expect(await pathExists(join(outside, "important.txt"))).toBe(true);
+    expect((await storage.readFile("target-proj", "note.md"))?.toString("utf8")).toBe("# Replaced\n");
+
+    // Re-create symlink for deleteProject test
+    await rm(join(storage.repoDir, "target-proj"), { recursive: true, force: true });
+    await symlink(outside, join(storage.repoDir, "target-proj"));
+
+    await storage.transaction({ projects: ["target-proj"] }, async (tx) => {
+      await tx.deleteProject("target-proj");
+      return { value: null, commit };
+    });
+
+    // Symlink removed, outside dir intact
+    expect(await pathExists(join(storage.repoDir, "target-proj"))).toBe(false);
+    expect(await pathExists(join(outside, "important.txt"))).toBe(true);
+
+    await storage.close();
+  });
 });

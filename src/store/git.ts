@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { chmod, copyFile, mkdir } from "node:fs/promises";
+import { chmod, copyFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import type { StorageConfig } from "../config.js";
@@ -10,17 +11,75 @@ export class GitError extends Error {
   readonly code: number;
   readonly stderr: string;
 
-  constructor(args: string[], code: number, stderr: string) {
-    super(`git ${args.join(" ")} failed with exit code ${code}:\n${stderr}`);
+  constructor(args: string[], code: number, stderr: string, configuredRemote?: string) {
+    const redactedArgs = redactArgs(args, configuredRemote);
+    const redactedStderr = redactStderr(stderr);
+    super(`git ${redactedArgs.join(" ")} failed with exit code ${code}:\n${redactedStderr}`);
     this.name = "GitError";
-    this.args = args;
+    this.args = redactedArgs;
     this.code = code;
-    this.stderr = stderr;
+    this.stderr = redactedStderr;
   }
 }
 
 export function redactRemote(url: string): string {
   return url.replace(/(https?:\/\/)[^/@\s]+@/g, "$1");
+}
+
+export function redactArgs(args: string[], configuredRemote?: string): string[] {
+  const result: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === undefined) {
+      continue;
+    }
+    if (arg === "-m") {
+      result.push("-m");
+      if (i + 1 < args.length) {
+        result.push("<message>");
+        i++;
+      }
+      continue;
+    }
+    if (arg.startsWith("-m") && arg.length > 2) {
+      result.push("-m<message>");
+      continue;
+    }
+    if (arg === "--message") {
+      result.push("--message");
+      if (i + 1 < args.length) {
+        result.push("<message>");
+        i++;
+      }
+      continue;
+    }
+    if (arg.startsWith("--message=")) {
+      result.push("--message=<message>");
+      continue;
+    }
+    if (
+      (configuredRemote && arg === configuredRemote) ||
+      arg.includes("://") ||
+      arg.startsWith("git@") ||
+      /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(arg) ||
+      /(https?:\/\/)[^/@\s]+@/.test(arg)
+    ) {
+      result.push(redactRemote(arg));
+      continue;
+    }
+    result.push(arg);
+  }
+  return result;
+}
+
+export function redactStderr(stderr: string): string {
+  const newlineIndex = stderr.indexOf("\n");
+  const firstLine = newlineIndex === -1 ? stderr : stderr.slice(0, newlineIndex);
+  if (/(https?:\/\/)[^/@\s]+@/.test(firstLine)) {
+    const redactedFirstLine = redactRemote(firstLine);
+    return newlineIndex === -1 ? redactedFirstLine : redactedFirstLine + stderr.slice(newlineIndex);
+  }
+  return stderr;
 }
 
 export function isPushRejection(stderr: string): boolean {
@@ -58,7 +117,8 @@ export class Git {
   readonly repoDir: string;
   readonly homeDir: string;
   private readonly config: StorageConfig;
-  private readonly env: Record<string, string>;
+  readonly env: Record<string, string>;
+  private sshTempDir?: string;
   private readonly baseArgs: string[];
 
   constructor(repoDir: string, homeDir: string, config: StorageConfig) {
@@ -113,8 +173,16 @@ export class Git {
       "-c",
       "core.autocrlf=false",
       "-c",
+      "core.fsmonitor=false",
+      "-c",
+      "protocol.ext.allow=never",
+      "-c",
       "log.showSignature=false",
     ];
+
+    if (!config.gitHostEnv) {
+      this.baseArgs.push("-c", "core.sshCommand=");
+    }
 
     if (config.gitHttpUsername && config.gitHttpPassword) {
       this.baseArgs.push(
@@ -126,24 +194,50 @@ export class Git {
     }
   }
 
+  get sshKeyPath(): string | undefined {
+    return this.sshTempDir ? join(this.sshTempDir, "id_okf") : undefined;
+  }
+
+  async close(): Promise<void> {
+    if (this.sshTempDir) {
+      try {
+        await rm(this.sshTempDir, { recursive: true, force: true });
+      } finally {
+        this.sshTempDir = undefined;
+      }
+    }
+  }
+
   async prepareSsh(): Promise<void> {
     if (!this.config.gitSshKeyPath) {
       return;
     }
 
-    const sshDir = join(this.homeDir, ".ssh");
-    await mkdir(sshDir, { recursive: true, mode: 0o700 });
-    const targetKeyPath = join(sshDir, "id_okf");
+    try {
+      await rm(join(this.homeDir, ".ssh", "id_okf"), { force: true });
+    } catch {
+      // Ignore if homeDir or .ssh directory does not exist
+    }
+
+    if (!this.sshTempDir) {
+      this.sshTempDir = await mkdtemp(join(tmpdir(), "okf-ssh-"));
+      await chmod(this.sshTempDir, 0o700);
+    }
+
+    const targetKeyPath = join(this.sshTempDir, "id_okf");
     await copyFile(this.config.gitSshKeyPath, targetKeyPath);
     await chmod(targetKeyPath, 0o600);
 
     let sshCmd = `ssh -i "${targetKeyPath}" -o IdentitiesOnly=yes -o BatchMode=yes`;
     // The chart always sets the path; the Secret key is optional, so strict mode requires the file to exist.
     const knownHosts = this.config.gitSshKnownHostsPath;
-    if (knownHosts && (await pathExists(knownHosts))) {
+    if (knownHosts) {
+      if (!(await pathExists(knownHosts))) {
+        throw new Error(`Configured known_hosts file does not exist: ${knownHosts}`);
+      }
       sshCmd += ` -o UserKnownHostsFile="${knownHosts}" -o StrictHostKeyChecking=yes`;
     } else {
-      sshCmd += ` -o UserKnownHostsFile="${join(sshDir, "known_hosts")}" -o StrictHostKeyChecking=accept-new`;
+      sshCmd += ` -o UserKnownHostsFile="${join(this.sshTempDir, "known_hosts")}" -o StrictHostKeyChecking=accept-new`;
     }
 
     this.env.GIT_SSH_COMMAND = sshCmd;
@@ -192,7 +286,7 @@ export class Git {
       const stdout = Buffer.concat(stdoutChunks).toString("utf8");
       const stderr = Buffer.concat(stderrChunks).toString("utf8") + extraStderr;
       if (failed && !opts?.allowFail) {
-        reject(new GitError(args, code, stderr));
+        reject(new GitError(args, code, stderr, this.config.gitRemoteUrl));
       } else {
         resolve({ code, stdout, stderr });
       }
@@ -227,7 +321,7 @@ export class Git {
 
     child.on("close", (code) => {
       if (code !== 0 && code !== null) {
-        child.stdout.destroy(new GitError(args, code, stderrBuffer));
+        child.stdout.destroy(new GitError(args, code, stderrBuffer, this.config.gitRemoteUrl));
       }
     });
 
