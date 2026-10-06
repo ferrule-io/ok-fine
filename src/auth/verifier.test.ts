@@ -127,13 +127,336 @@ describe("OAuth authentication and verification", () => {
       expect(authInfo.scopes).toContain("okf:write");
       expect(authInfo.scopes).toContain("okf:admin");
     });
+    describe("AccessPolicy enforcement", () => {
+      it("allows token when sub matches allowedSubjects", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["preferred_username", "email", "sub"],
+          access: {
+            allowedSubjects: ["dev|alice"],
+            allowedEmails: [],
+            requiredGroups: [],
+            groupsClaim: "groups",
+            allowedClientIds: [],
+          },
+        });
+
+        const token = await devIssuer.mintToken({ username: "alice" });
+        const authInfo = await verifier.verifyAccessToken(token);
+        expect(authInfo.extra?.sub).toBe("dev|alice");
+      });
+
+      it("rejects token when sub does not match allowedSubjects and email is not allowed", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["preferred_username", "email", "sub"],
+          access: {
+            allowedSubjects: ["dev|alice"],
+            allowedEmails: [],
+            requiredGroups: [],
+            groupsClaim: "groups",
+            allowedClientIds: [],
+          },
+        });
+
+        const token = await devIssuer.mintToken({ username: "bob" });
+        await expect(verifier.verifyAccessToken(token)).rejects.toMatchObject({
+          code: OAuthErrorCode.InsufficientScope,
+          message: "token not permitted by this server's access policy",
+        });
+      });
+
+      it("allows token when email matches allowedEmails (case-insensitive) and email_verified is true", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["preferred_username", "email", "sub"],
+          access: {
+            allowedSubjects: [],
+            allowedEmails: ["alice@example.com"],
+            requiredGroups: [],
+            groupsClaim: "groups",
+            allowedClientIds: [],
+          },
+        });
+
+        const token = await devIssuer.mintToken({
+          claims: { email: "Alice@EXAMPLE.COM", email_verified: true },
+        });
+        const authInfo = await verifier.verifyAccessToken(token);
+        expect(authInfo.token).toBe(token);
+      });
+
+      it("rejects token when email matches allowedEmails but email_verified is false or missing", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["preferred_username", "email", "sub"],
+          access: {
+            allowedSubjects: [],
+            allowedEmails: ["alice@example.com"],
+            requiredGroups: [],
+            groupsClaim: "groups",
+            allowedClientIds: [],
+          },
+        });
+
+        const unverifiedToken = await devIssuer.mintToken({
+          claims: { email: "alice@example.com", email_verified: false },
+        });
+        await expect(verifier.verifyAccessToken(unverifiedToken)).rejects.toMatchObject({
+          code: OAuthErrorCode.InsufficientScope,
+          message: "token not permitted by this server's access policy",
+        });
+
+        const missingVerifiedToken = await devIssuer.mintToken({
+          claims: { email: "alice@example.com" },
+        });
+        await expect(verifier.verifyAccessToken(missingVerifiedToken)).rejects.toMatchObject({
+          code: OAuthErrorCode.InsufficientScope,
+          message: "token not permitted by this server's access policy",
+        });
+      });
+
+      it("allows token when sub matches even if email does not match", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["preferred_username", "email", "sub"],
+          access: {
+            allowedSubjects: ["dev|alice"],
+            allowedEmails: ["bob@example.com"],
+            requiredGroups: [],
+            groupsClaim: "groups",
+            allowedClientIds: [],
+          },
+        });
+
+        const token = await devIssuer.mintToken({
+          username: "alice",
+          claims: { email: "other@example.com", email_verified: true },
+        });
+        const authInfo = await verifier.verifyAccessToken(token);
+        expect(authInfo.extra?.sub).toBe("dev|alice");
+      });
+
+      it("allows token when verified email matches even if sub does not match", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["preferred_username", "email", "sub"],
+          access: {
+            allowedSubjects: ["dev|alice"],
+            allowedEmails: ["bob@example.com"],
+            requiredGroups: [],
+            groupsClaim: "groups",
+            allowedClientIds: [],
+          },
+        });
+
+        const token = await devIssuer.mintToken({
+          username: "charlie",
+          claims: { email: "bob@example.com", email_verified: true },
+        });
+        const authInfo = await verifier.verifyAccessToken(token);
+        expect(authInfo.token).toBe(token);
+      });
+
+      it("enforces requiredGroups from array or string claims", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["preferred_username", "email", "sub"],
+          access: {
+            allowedSubjects: [],
+            allowedEmails: [],
+            requiredGroups: ["admin", "editor"],
+            groupsClaim: "groups",
+            allowedClientIds: [],
+          },
+        });
+
+        const arrayMatchToken = await devIssuer.mintToken({
+          claims: { groups: ["viewer", "editor"] },
+        });
+        expect((await verifier.verifyAccessToken(arrayMatchToken)).token).toBe(arrayMatchToken);
+
+        const stringMatchToken = await devIssuer.mintToken({
+          claims: { groups: "admin" },
+        });
+        expect((await verifier.verifyAccessToken(stringMatchToken)).token).toBe(stringMatchToken);
+
+        const noMatchToken = await devIssuer.mintToken({
+          claims: { groups: ["viewer"] },
+        });
+        await expect(verifier.verifyAccessToken(noMatchToken)).rejects.toMatchObject({
+          code: OAuthErrorCode.InsufficientScope,
+          message: "token not permitted by this server's access policy",
+        });
+
+        const missingGroupsToken = await devIssuer.mintToken({});
+        await expect(verifier.verifyAccessToken(missingGroupsToken)).rejects.toMatchObject({
+          code: OAuthErrorCode.InsufficientScope,
+          message: "token not permitted by this server's access policy",
+        });
+      });
+
+      it("enforces requiredGroups using custom groupsClaim", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["preferred_username", "email", "sub"],
+          access: {
+            allowedSubjects: [],
+            allowedEmails: [],
+            requiredGroups: ["admin"],
+            groupsClaim: "roles",
+            allowedClientIds: [],
+          },
+        });
+
+        const matchToken = await devIssuer.mintToken({
+          claims: { roles: ["admin", "user"] },
+        });
+        expect((await verifier.verifyAccessToken(matchToken)).token).toBe(matchToken);
+
+        const noMatchToken = await devIssuer.mintToken({
+          claims: { roles: ["user"] },
+        });
+        await expect(verifier.verifyAccessToken(noMatchToken)).rejects.toMatchObject({
+          code: OAuthErrorCode.InsufficientScope,
+          message: "token not permitted by this server's access policy",
+        });
+      });
+
+      it("enforces allowedClientIds from azp, client_id, or cid", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["preferred_username", "email", "sub"],
+          access: {
+            allowedSubjects: [],
+            allowedEmails: [],
+            requiredGroups: [],
+            groupsClaim: "groups",
+            allowedClientIds: ["allowed-client"],
+          },
+        });
+
+        const azpToken = await devIssuer.mintToken({
+          claims: { azp: "allowed-client", client_id: "other" },
+        });
+        expect((await verifier.verifyAccessToken(azpToken)).token).toBe(azpToken);
+
+        const clientIdToken = await devIssuer.mintToken({
+          claims: { azp: undefined, client_id: "allowed-client" },
+        });
+        expect((await verifier.verifyAccessToken(clientIdToken)).token).toBe(clientIdToken);
+
+        const cidToken = await devIssuer.mintToken({
+          claims: { azp: undefined, client_id: undefined, cid: "allowed-client" },
+        });
+        expect((await verifier.verifyAccessToken(cidToken)).token).toBe(cidToken);
+
+        const deniedToken = await devIssuer.mintToken({
+          claims: { azp: "forbidden-client", client_id: "forbidden-client" },
+        });
+        await expect(verifier.verifyAccessToken(deniedToken)).rejects.toMatchObject({
+          code: OAuthErrorCode.InsufficientScope,
+          message: "token not permitted by this server's access policy",
+        });
+
+        const noClientToken = await devIssuer.mintToken({
+          claims: { azp: undefined, client_id: undefined, cid: undefined },
+        });
+        await expect(verifier.verifyAccessToken(noClientToken)).rejects.toMatchObject({
+          code: OAuthErrorCode.InsufficientScope,
+          message: "token not permitted by this server's access policy",
+        });
+      });
+    });
+
+    describe("email_verified identity selection", () => {
+      it("uses email claim as identity when email_verified is true", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["email", "preferred_username", "sub"],
+        });
+
+        const token = await devIssuer.mintToken({
+          username: "alice",
+          claims: { email: "alice@example.com", email_verified: true },
+        });
+
+        const authInfo = await verifier.verifyAccessToken(token);
+        expect(authInfo.extra?.identity).toBe("alice@example.com");
+      });
+
+      it("falls back to next claim when email_verified is false or missing", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["email", "preferred_username", "sub"],
+        });
+
+        const unverifiedToken = await devIssuer.mintToken({
+          username: "alice",
+          claims: { email: "alice@example.com", email_verified: false },
+        });
+        const unverifiedInfo = await verifier.verifyAccessToken(unverifiedToken);
+        expect(unverifiedInfo.extra?.identity).toBe("alice");
+
+        const missingVerifiedToken = await devIssuer.mintToken({
+          username: "alice",
+          claims: { email: "alice@example.com" },
+        });
+        const missingVerifiedInfo = await verifier.verifyAccessToken(missingVerifiedToken);
+        expect(missingVerifiedInfo.extra?.identity).toBe("alice");
+      });
+
+      it("leaves identity as null if email_verified is false and no other claims match", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["email"],
+        });
+
+        const token = await devIssuer.mintToken({
+          username: "alice",
+          claims: { email: "alice@example.com", email_verified: false },
+        });
+        const authInfo = await verifier.verifyAccessToken(token);
+        expect(authInfo.extra?.identity).toBeNull();
+      });
+    });
   });
 
   describe("discoverAuthorizationServer", () => {
-    it("discovers metadata and jwks_uri from dev issuer", async () => {
-      const discovered = await discoverAuthorizationServer(devIssuer.url);
+    it("discovers metadata and jwks_uri from dev issuer with allowInsecureIssuer: true", async () => {
+      const discovered = await discoverAuthorizationServer(devIssuer.url, { allowInsecureIssuer: true });
       expect(discovered.metadata.issuer).toBe(devIssuer.url);
       expect(discovered.jwksUri).toBe(`${devIssuer.url}/jwks`);
+    });
+
+    it("rejects http jwks_uri unless allowInsecureIssuer is true", async () => {
+      await expect(discoverAuthorizationServer(devIssuer.url)).rejects.toThrow(
+        `authorization server discovery failed for ${devIssuer.url}: jwks_uri must be https`,
+      );
     });
   });
 

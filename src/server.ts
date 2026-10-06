@@ -55,10 +55,46 @@ export interface RunningServer {
 const DISCOVERY_ATTEMPTS = 5;
 const DISCOVERY_RETRY_MS = 2000;
 
+function parseHostHeader(hostHeader: string | undefined): string | null {
+  if (!hostHeader || typeof hostHeader !== "string") return null;
+  const trimmed = hostHeader.trim();
+  if (trimmed.length === 0 || /[/\s\\@]/.test(trimmed)) return null;
+
+  if (trimmed.startsWith("[")) {
+    const closeBracket = trimmed.indexOf("]");
+    if (closeBracket === -1) return null;
+    const rest = trimmed.slice(closeBracket + 1);
+    if (rest.length > 0 && !/^:\d+$/.test(rest)) return null;
+    return trimmed.slice(0, closeBracket + 1).toLowerCase();
+  }
+
+  const colonIndex = trimmed.indexOf(":");
+  if (colonIndex !== -1) {
+    const port = trimmed.slice(colonIndex + 1);
+    if (!/^\d+$/.test(port)) return null;
+    return trimmed.slice(0, colonIndex).toLowerCase();
+  }
+
+  return trimmed.toLowerCase();
+}
+
 export async function startServer(config: Config): Promise<RunningServer> {
+  const tp = config.trustProxy;
+  const trustProxy =
+    typeof tp === "number"
+      ? (_addr: string, hop: number) => hop < tp
+      : typeof tp === "string"
+        ? tp
+            .split(",")
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+        : tp;
+
   const app = Fastify({
     logger: { level: config.logLevel, redact: ["req.headers.authorization"] },
-    trustProxy: true,
+    trustProxy,
+    requestTimeout: 120_000,
+    connectionTimeout: 120_000,
     bodyLimit: 4 * 1024 * 1024,
   });
   app.removeContentTypeParser("text/plain");
@@ -81,6 +117,7 @@ export async function startServer(config: Config): Promise<RunningServer> {
       try {
         discovered = await discoverAuthorizationServer(config.auth.issuer, {
           timeoutMs: 5000,
+          allowInsecureIssuer: config.auth.allowInsecureIssuer,
           ...(config.auth.jwksUri === undefined ? {} : { jwksUri: config.auth.jwksUri }),
         });
       } catch (err) {
@@ -108,11 +145,24 @@ export async function startServer(config: Config): Promise<RunningServer> {
       reply.header("access-control-allow-origin", "*").send(metadata),
     );
 
+    const { access } = config.auth;
+    if (
+      access.allowedSubjects.length === 0 &&
+      access.allowedEmails.length === 0 &&
+      access.requiredGroups.length === 0 &&
+      access.allowedClientIds.length === 0
+    ) {
+      app.log.warn(
+        `no OAUTH_ALLOWED_* / OAUTH_REQUIRED_GROUPS policy set: every token from ${config.auth.issuer} with an ok-fine scope can read all projects`,
+      );
+    }
+
     const verifier = new JwtTokenVerifier({
       issuer: config.auth.issuer,
       audiences: config.auth.audiences,
       jwksUri,
       identityClaims: config.auth.identityClaims,
+      access: config.auth.access,
     });
     const authenticator = createAuthenticator({
       verifier,
@@ -133,6 +183,58 @@ export async function startServer(config: Config): Promise<RunningServer> {
     };
   } else {
     app.log.warn("authentication disabled, every request has admin access; never expose this beyond localhost");
+
+    const allowedHosts: Record<string, true> = {
+      localhost: true,
+      "127.0.0.1": true,
+      "[::1]": true,
+      "::1": true,
+    };
+    const publicHost = new URL(config.publicBaseUrl).hostname.toLowerCase();
+    allowedHosts[publicHost] = true;
+    if (publicHost.startsWith("[") && publicHost.endsWith("]")) {
+      allowedHosts[publicHost.slice(1, -1)] = true;
+    }
+
+    app.addHook("onRequest", async (req, reply) => {
+      if (req.method === "GET" && (req.url === "/healthz" || req.url.startsWith("/healthz?"))) {
+        return;
+      }
+      const host = parseHostHeader(req.headers.host);
+      if (!host || !allowedHosts[host]) {
+        return reply.code(403).send({
+          error: {
+            code: "forbidden",
+            message: `Host header '${req.headers.host ?? ""}' is not allowed in AUTH_MODE=none`,
+          },
+        });
+      }
+      if (req.headers.origin !== undefined) {
+        const rawOrigin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
+        let originAllowed = false;
+        if (typeof rawOrigin === "string") {
+          try {
+            const parsed = new URL(rawOrigin);
+            if (
+              (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+              allowedHosts[parsed.hostname.toLowerCase()]
+            ) {
+              originAllowed = true;
+            }
+          } catch {
+            // invalid origin URL
+          }
+        }
+        if (!originAllowed) {
+          return reply.code(403).send({
+            error: {
+              code: "forbidden",
+              message: `Origin '${rawOrigin ?? ""}' is not allowed in AUTH_MODE=none`,
+            },
+          });
+        }
+      }
+    });
 
     const allScopes = [config.scopeNames.read, config.scopeNames.write, config.scopeNames.admin];
     const anonymousAuthInfo: AuthInfo = {
@@ -198,11 +300,11 @@ export async function startServer(config: Config): Promise<RunningServer> {
   app.decorateRequest("principal", null);
   app.decorateRequest("authInfo", null);
   await app.register(async (secured) => {
-    secured.addHook("preHandler", async (req, reply) => {
+    secured.addHook("onRequest", async (req, reply) => {
       const challenge = await authHandler.authenticate(req);
       if (challenge) return reply.send(challenge);
       if (authHandler.mode === "oidc") {
-        const need = req.routeOptions.config.permission ?? "read";
+        const need = req.routeOptions?.config?.permission ?? "read";
         const p = req.principal;
         const permitted = p !== null && (need === "admin" ? p.canAdmin : need === "write" ? p.canWrite : p.canRead);
         if (!permitted) return reply.send(authHandler.insufficientScope(config.scopeNames[need]));
