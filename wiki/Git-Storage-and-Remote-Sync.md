@@ -7,6 +7,16 @@ The git remote holding the knowledge repository **must be private**, with branch
 
 Symlinks pulled from the knowledge remote are never followed for reads or writes and are ignored by the storage layer.
 
+### Allowed remote URL formats
+
+When `GIT_REMOTE_URL` is configured, it must use one of the following formats:
+- `https://…` (plaintext `http://` is rejected)
+- `ssh://…`
+- SCP-style SSH: `user@host:path` (contains `@` before `:`)
+- `file://…` or an absolute local path (starting with `/`)
+
+All other formats—including `http://`, `git://`, `ext::`, and relative paths—fail configuration validation at startup (`GIT_REMOTE_URL must be https://, ssh://, user@host:path, file:// or an absolute path`).
+
 # Sync loop
 
 With `GIT_REMOTE_URL` set, ok-fine:
@@ -41,7 +51,7 @@ Deleting a concept or file in ok-fine creates a commit removing the file from th
 
 # Remote authentication
 
-- **SSH:** Configured via `GIT_SSH_KEY_PATH` and `GIT_SSH_KNOWN_HOSTS_PATH`. If `GIT_SSH_KNOWN_HOSTS_PATH` is set but the file is missing, startup fails immediately (preventing silent trust-on-first-use). The Helm chart requires a `known_hosts` entry in the secret for SSH authentication. Runtime SSH key copies are stored in the OS temp directory, never in `DATA_DIR`. Git error messages automatically redact remote URLs and commit messages to prevent credential leakage.
+- **SSH:** Configured via `GIT_SSH_KEY_PATH` and `GIT_SSH_KNOWN_HOSTS_PATH`. Setting `GIT_SSH_KEY_PATH` requires `GIT_SSH_KNOWN_HOSTS_PATH` to also be set, and the `known_hosts` file must exist on disk; startup fails configuration validation otherwise. Strict host key checking is always enforced when an SSH key is configured. The Helm chart requires a `known_hosts` entry in the secret for SSH authentication. Runtime SSH key copies are stored in the OS temp directory, never in `DATA_DIR`. Git error messages automatically redact remote URLs and commit messages to prevent credential leakage.
 - **HTTPS:** Configured via `GIT_HTTP_USERNAME` / `GIT_HTTP_PASSWORD`, passed via environment, never written to git config.
 
 The npm CLI (`ok-fine`, `ok-fine serve`) instead runs git with your own environment: your ssh-agent and

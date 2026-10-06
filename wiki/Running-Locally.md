@@ -31,7 +31,7 @@ ok-fine [stdio|serve] [options]
 | Flag | Variable | Default |
 |---|---|---|
 | `--data-dir <path>` | `DATA_DIR` | `~/.ok-fine` |
-| `--remote <url>` | `GIT_REMOTE_URL` | unset (local only) |
+| `--remote <url>` | `GIT_REMOTE_URL` | unset (local only); accepts `https://`, `ssh://`, `user@host:path`, `file://`, or an absolute path |
 | `--branch <name>` | `GIT_BRANCH` | `main` |
 | `--sync-interval <sec>` | `GIT_SYNC_INTERVAL_SECONDS` | `60`; `0` disables periodic sync |
 | `--log-level <level>` | `LOG_LEVEL` | `info` |
@@ -55,7 +55,9 @@ The CLI runs git with your own environment and credentials: your ssh-agent and `
 helpers such as osxkeychain or `gh auth setup-git`. ok-fine cannot answer prompts (git runs without a terminal), so
 accept the host key and unlock keys beforehand, for example by running `git ls-remote <url>` once. Your git hooks
 and global ignore and attributes files are not applied to the knowledge repository. An explicit `GIT_SSH_KEY_PATH`
-still overrides your ssh setup.
+still overrides your ssh setup, and now also requires `GIT_SSH_KNOWN_HOSTS_PATH`. When configured, `--remote` or
+`GIT_REMOTE_URL` must use a supported format: `https://…`, `ssh://…`, scp-style `user@host:path`, `file://…`, or an
+absolute local path (insecure `http://` and relative paths are rejected).
 
 # Several sessions at once
 

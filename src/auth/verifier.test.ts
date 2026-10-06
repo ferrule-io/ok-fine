@@ -443,6 +443,66 @@ describe("OAuth authentication and verification", () => {
         const authInfo = await verifier.verifyAccessToken(token);
         expect(authInfo.extra?.identity).toBeNull();
       });
+
+      it("unverified email and email-shaped preferred_username fall through to sub", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["email", "preferred_username", "sub"],
+        });
+
+        const token = await devIssuer.mintToken({
+          username: "owner",
+          claims: {
+            email: "owner@example.com",
+            email_verified: false,
+            preferred_username: "owner@example.com",
+            sub: "user-12345",
+          },
+        });
+        const authInfo = await verifier.verifyAccessToken(token);
+        expect(authInfo.extra?.identity).toBe("user-12345");
+      });
+
+      it("accepts non-email-shaped preferred_username as identity", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["email", "preferred_username", "sub"],
+        });
+
+        const token = await devIssuer.mintToken({
+          username: "alice",
+          claims: {
+            preferred_username: "alice",
+          },
+        });
+        const authInfo = await verifier.verifyAccessToken(token);
+        expect(authInfo.extra?.identity).toBe("alice");
+      });
+
+      it("accepts sub containing '@' when sub is the selected claim", async () => {
+        const verifier = new JwtTokenVerifier({
+          issuer: devIssuer.url,
+          audiences: [audience],
+          jwksUri: `${devIssuer.url}/jwks`,
+          identityClaims: ["email", "preferred_username", "sub"],
+        });
+
+        const token = await devIssuer.mintToken({
+          username: "bob",
+          claims: {
+            email: "bob@example.com",
+            email_verified: false,
+            preferred_username: "bob@other.com",
+            sub: "alice@domain.org",
+          },
+        });
+        const authInfo = await verifier.verifyAccessToken(token);
+        expect(authInfo.extra?.identity).toBe("alice@domain.org");
+      });
     });
   });
 

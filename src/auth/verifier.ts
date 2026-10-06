@@ -157,7 +157,11 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
       }
       const val = payload[claim];
       if (typeof val === "string" && val.trim().length > 0) {
-        identity = val.trim();
+        const trimmed = val.trim();
+        if (claim !== "email" && claim !== "sub" && trimmed.includes("@")) {
+          continue;
+        }
+        identity = trimmed;
         break;
       }
     }

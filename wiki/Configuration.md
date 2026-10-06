@@ -11,7 +11,7 @@ message naming every bad variable.
 | `OAUTH_AUDIENCE` | `<PUBLIC_BASE_URL>/mcp` | Comma-separated accepted audiences (`oidc` mode only) |
 | `OAUTH_JWKS_URI` | discovered | Override the JWKS URL; must be `https://` unless `OAUTH_ALLOW_INSECURE_ISSUER=true` (`oidc` mode only) |
 | `OAUTH_SCOPE_READ` / `_WRITE` / `_ADMIN` | `okf:read` / `okf:write` / `okf:admin` | Scope names (granted to anonymous principal in `none` mode) |
-| `OAUTH_IDENTITY_CLAIMS` | `email,preferred_username,sub` | Claims tried in order for `human:<id>` binding; `email` is used only when `email_verified=true` (`oidc` mode only) |
+| `OAUTH_IDENTITY_CLAIMS` | `email,preferred_username,sub` | Claims tried in order for `human:<id>` binding; `email` is used only when `email_verified=true`, and any other claim except `sub` whose value contains `@` is ignored (`oidc` mode only) |
 | `OAUTH_ALLOWED_SUBJECTS` | unset | Comma-separated list of allowed JWT `sub` values (`oidc` mode only) |
 | `OAUTH_ALLOWED_EMAILS` | unset | Comma-separated list of allowed emails, compared case-insensitively, requiring `email_verified=true` (`oidc` mode only) |
 | `OAUTH_REQUIRED_GROUPS` | unset | Comma-separated list of required groups; token's groups claim must intersect (`oidc` mode only) |
@@ -24,10 +24,10 @@ message naming every bad variable.
 | `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
 | `DATA_DIR` | `/data` (container), `~/.ok-fine` (CLI) | Absolute path for the repo and working files |
 | `GIT_BRANCH` | `main` | |
-| `GIT_REMOTE_URL` | unset | SSH/HTTPS URL or local path; unset keeps history on disk only |
+| `GIT_REMOTE_URL` | unset | Remote repository URL (`https://…`, `ssh://…`, scp-like `user@host:path`, `file://…`, or an absolute local path `/…`); unset keeps history on disk only. Other schemes (e.g. `http://`, `git://`, `ext::`) and relative paths are rejected |
 | `GIT_SYNC_INTERVAL_SECONDS` | `60` | Periodic sync; `0` disables |
-| `GIT_SSH_KEY_PATH` | unset | Private key file |
-| `GIT_SSH_KNOWN_HOSTS_PATH` | unset | `known_hosts` file; enables strict host checking. Startup fails if set but the file is missing (no silent trust-on-first-use) |
+| `GIT_SSH_KEY_PATH` | unset | Private key file; requires `GIT_SSH_KNOWN_HOSTS_PATH` to also be set |
+| `GIT_SSH_KNOWN_HOSTS_PATH` | unset | `known_hosts` file; enables strict host checking. Required when `GIT_SSH_KEY_PATH` is set. Startup fails if missing (no trust-on-first-use) |
 | `GIT_HTTP_USERNAME` / `GIT_HTTP_PASSWORD` | unset | Set both or neither |
 | `MAX_FILE_BYTES` | `1048576` | Max size of one concept or file |
 | `MAX_ARCHIVE_BYTES` | `52428800` | Max compressed archive upload |

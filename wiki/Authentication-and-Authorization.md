@@ -44,8 +44,11 @@ To configure your provider:
 - Define the scopes above as non-default scopes granted only via explicit role or group mappings to authorized clients or users.
 - Make sure access tokens are JWTs.
 - Set `OAUTH_ISSUER` to the exact `iss` value in the tokens. Auth0 issuers end with `/`.
-- `human:<id>` actors are accepted only when `<id>` equals the first claim found in `OAUTH_IDENTITY_CLAIMS`
-  (default `email`, then `preferred_username`, then `sub`). The `email` identity claim is used for `human:<id>` only when `email_verified=true`; otherwise the next claim is tried. Email identities compare case-insensitively. Agents derive `<id>` from the developer's `git config user.email`, so the token's `email` claim must carry that address and be verified.
+- `human:<id>` actors are accepted only when `<id>` equals the resolved token identity, determined by trying claims from `OAUTH_IDENTITY_CLAIMS` in order (default `email`, then `preferred_username`, then `sub`):
+  - `email` counts only when `email_verified=true`.
+  - Any other claim except `sub` whose value contains `@` is skipped (so a user-chosen `preferred_username` like `owner@example.com` can never bind `human:owner@example.com`). Non-email-shaped usernames and `sub` (even if containing `@`) still bind.
+  - Email identities compare case-insensitively.
+  - Agents derive `<id>` from the developer's `git config user.email`, so the token's `email` claim must carry that address and be verified.
 
 ## Access policy
 
