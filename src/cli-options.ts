@@ -12,7 +12,7 @@ export interface CliInvocation {
 export const USAGE = `Usage: ok-fine [stdio|serve] [options]
 
 Commands:
-  stdio (default)          Serve MCP over stdin/stdout for one local client
+  stdio (default)          Serve MCP over stdin/stdout
   serve                    Serve MCP and the REST API over HTTP
 
 Options:

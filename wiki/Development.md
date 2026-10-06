@@ -25,7 +25,7 @@ Layout:
 | `src/service/` | `KnowledgeService`: one method per operation, shared by MCP and REST |
 | `src/auth/` | OIDC discovery, JWT verification, bearer challenges |
 | `src/mcp/`, `src/http/` | MCP tools and REST routes |
-| `src/server.ts` | Wiring: `startServer` (HTTP) and `startStdioServer` (used by `main.ts`, `cli.ts`, and the end-to-end test) |
+| `src/server.ts` | Wiring: `startServer` (HTTP) and `startLocalHost` (local endpoint host) |
 | `src/main.ts` | Container entry point |
 | `src/cli.ts`, `src/cli-options.ts` | npm CLI (`ok-fine`): stdio and `serve` |
 | `src/data-dir-lock.ts` | One CLI process per data directory |

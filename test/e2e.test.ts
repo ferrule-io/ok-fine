@@ -13,7 +13,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, loadStorageConfig } from "../src/config.js";
 import { type DevIssuer, startDevIssuer } from "../src/dev/issuer.js";
 import type { UiClientConfig } from "../src/http/ui.js";
-import { type RunningServer, type RunningStdioServer, startServer, startStdioServer } from "../src/server.js";
+import { type RunningServer, startLocalHost, startServer } from "../src/server.js";
+import { type RunningStdioProxy, startStdioProxy } from "../src/stdio-proxy.js";
 import { VERSION } from "../src/version.js";
 import {
   buildAuthorizationUrl,
@@ -498,15 +499,18 @@ describe("ok-fine over stdio", () => {
   const silent = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
   const clientToServer = new PassThrough();
   const serverToClient = new PassThrough();
-  let stdioServer: RunningStdioServer;
+  let stdioServer: RunningStdioProxy;
   let stdioDataDir: string;
   let client: Client;
 
   beforeAll(async () => {
     stdioDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "okf-"));
-    stdioServer = await startStdioServer(loadStorageConfig({ DATA_DIR: stdioDataDir, LOG_LEVEL: "silent" }), {
+    const config = loadStorageConfig({ DATA_DIR: stdioDataDir, LOG_LEVEL: "silent" });
+    stdioServer = await startStdioProxy({
+      config,
       log: silent,
       identity: "dev@example.com",
+      startHost: () => startLocalHost(config, { log: silent }),
       stdin: clientToServer,
       stdout: serverToClient,
     });

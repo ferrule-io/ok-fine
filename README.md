@@ -21,7 +21,7 @@ claude mcp add --scope user ok-fine -- npx -y @ferrule-io/ok-fine
 ```
 
 Other harnesses: [Coding agents](https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents#local-setup-stdio). Git
-remotes, flags, and several concurrent sessions: [Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally).
+remotes, flags, and concurrent sessions: [Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally).
 
 ### HTTP server (REST + MCP)
 

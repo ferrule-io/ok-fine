@@ -1,4 +1,3 @@
-import type { Readable, Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   type AuthInfo,
@@ -7,7 +6,6 @@ import {
   getOAuthProtectedResourceMetadataUrl,
   type OAuthMetadata,
 } from "@modelcontextprotocol/server";
-import { StdioServerTransport, serveStdio } from "@modelcontextprotocol/server/stdio";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
 import { type DiscoveredAuthorizationServer, discoverAuthorizationServer } from "./auth/discovery.js";
@@ -18,6 +16,7 @@ import { OkfError } from "./errors.js";
 import { registerMcpRoute } from "./http/mcp-route.js";
 import { registerRestRoutes } from "./http/rest.js";
 import { DEFAULT_UI_DIR, endpointOrigins, registerUiRoutes } from "./http/ui.js";
+import { createLocalHost, type RunningLocalHost } from "./local-host.js";
 import { createMcpServer } from "./mcp/server.js";
 import { KnowledgeService } from "./service/knowledge-service.js";
 import type { Principal } from "./service/principal.js";
@@ -83,9 +82,14 @@ function parseHostHeader(hostHeader: string | undefined): string | null {
 export interface StartServerOptions {
   /** Built web UI directory; default DEFAULT_UI_DIR. */
   uiDir?: string;
+  /** When true, also host the local endpoint socket/pipe for stdio sessions. */
+  hostEndpoint?: boolean;
 }
 
 export async function startServer(config: Config, options: StartServerOptions = {}): Promise<RunningServer> {
+  if (options.hostEndpoint && config.auth.mode !== "none") {
+    throw new Error("Cannot enable hostEndpoint with auth mode oidc");
+  }
   const tp = config.trustProxy;
   const trustProxy =
     typeof tp === "number"
@@ -334,15 +338,30 @@ export async function startServer(config: Config, options: StartServerOptions = 
     registerRestRoutes(secured, service);
   });
 
-  const address = await app.listen({ port: config.port, host: config.host });
-
   const stopSync = startPeriodicSync(config, service, app.log);
+
+  let localHost: RunningLocalHost | undefined;
+  if (options.hostEndpoint) {
+    localHost = await createLocalHost({ service, config, log: app.log });
+  }
+
+  let address: string;
+  try {
+    address = await app.listen({ port: config.port, host: config.host });
+  } catch (err) {
+    stopSync();
+    await localHost?.close();
+    await storage.close();
+    await mcpHandler.close();
+    throw err;
+  }
 
   return {
     app,
     url: address,
     close: async () => {
       stopSync();
+      await localHost?.close();
       await app.close();
       await storage.close();
       await mcpHandler.close();
@@ -373,65 +392,28 @@ function startPeriodicSync(config: StorageConfig, service: KnowledgeService, log
   };
 }
 
-export interface StdioServerOptions {
+export interface LocalHostOptions {
   log: Logger;
-  /** Identity for `human:<id>` actors (the local git email); null rejects human actors. */
-  identity: string | null;
-  /** Defaults to process.stdin. */
-  stdin?: Readable;
-  /** Defaults to process.stdout. */
-  stdout?: Writable;
 }
 
-export interface RunningStdioServer {
-  /** Resolves when the client closes stdin. */
-  done: Promise<void>;
-  close(): Promise<void>;
-}
-
-/** Serves MCP over stdio to one local client with full permissions. Only the transport writes to stdout. */
-export async function startStdioServer(
-  config: StorageConfig,
-  options: StdioServerOptions,
-): Promise<RunningStdioServer> {
+/** Starts the local endpoint host that listens on a domain socket / named pipe. */
+export async function startLocalHost(config: StorageConfig, options: LocalHostOptions): Promise<RunningLocalHost> {
   const { log } = options;
-  const stdin = options.stdin ?? process.stdin;
-  const stdout = options.stdout ?? process.stdout;
-
   const storage = await GitBackend.open(config, log);
   const catalog = new Catalog();
   const service = new KnowledgeService({ config, storage, catalog, log });
   await service.initialize();
 
-  const principal: Principal = {
-    subject: "local",
-    clientId: "stdio",
-    identity: options.identity,
-    scopes: [],
-    canRead: true,
-    canWrite: true,
-    canAdmin: true,
-  };
-
   const stopSync = startPeriodicSync(config, service, log);
-
-  // serveStdio owns transport.onclose, so watch stdin directly.
-  const { promise: done, resolve } = Promise.withResolvers<void>();
-  stdin.once("end", resolve);
-  stdin.once("close", resolve);
-
-  const handle = serveStdio(() => createMcpServer(service, principal, log), {
-    transport: new StdioServerTransport(stdin, stdout),
-    onerror: (err) => log.error({ err }, "stdio transport error"),
-  });
+  const host = await createLocalHost({ service, config, log });
 
   let closing: Promise<void> | undefined;
   return {
-    done,
+    endpointPath: host.endpointPath,
     close: () => {
       closing ??= (async () => {
         stopSync();
-        await handle.close();
+        await host.close();
         // Waits for the storage mutex, so an in-flight write still commits.
         await storage.close();
       })();
