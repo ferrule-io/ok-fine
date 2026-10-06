@@ -9,6 +9,7 @@ A client only sees the tools its token's scopes allow.
 | `get_history` | read | Git history of a concept or project |
 | `read_file` | read | Any text file verbatim (including `index.md`, `log.md`, assets) |
 | `lint_project` | read | OKF conformance report |
+| `submit_feedback` | read | Prefilled public GitHub issue link for feedback about ok-fine; the user submits it |
 | `create_project` | write | New bundle with `overview.md`, `log.md`, `index.md` |
 | `write_concept` | write | Create or replace a concept (whole frontmatter and body) |
 | `verify_concept` | write | Append a verification, raising the trust tier |
