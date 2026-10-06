@@ -1,6 +1,6 @@
 ---
 name: ok-fine
-description: "Shared project knowledge for the current codebase, stored in the ok-fine MCP server rather than in the repository. Use at the start of any non-trivial task in a git repository to find, read, and keep fresh that repository's ok-fine project (architecture, decisions, conventions, runbooks), whenever the user asks what is known or was decided about this codebase, and before finishing a task to record durable knowledge you learned."
+description: "Shared project knowledge for the current codebase, stored in the ok-fine MCP server rather than in the repository. Use at the start of every task in a git repository, before planning or editing, to find, read, and keep fresh that repository's ok-fine project (architecture, decisions, conventions, runbooks), whenever the user asks what is known or was decided about this codebase, and before finishing a task to record durable knowledge you learned."
 ---
 
 # ok-fine

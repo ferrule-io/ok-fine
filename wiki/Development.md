@@ -33,7 +33,7 @@ Layout:
 | `src/dev/` | Development token issuer |
 | `web/` | Read-only web UI (React, Vite, Tailwind); built into `dist/ui`, talks only to `/api/v1` |
 | `charts/ok-fine/` | Helm chart |
-| `agents/` | Agent package (skills, SessionStart hook, pi/omp extension, harness manifests); mirrored to `ferrule-io/ok-fine-agents` |
+| `agents/` | Agent package (skills, reminder hooks, pi/omp extension, harness manifests); mirrored to `ferrule-io/ok-fine-agents` |
 | `wiki/` | GitHub wiki source; mirrored to the repository wiki on release |
 
 ## CI and releases

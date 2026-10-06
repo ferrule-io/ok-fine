@@ -5,7 +5,27 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh \"${extensionPath}${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\""
+            "command": "sh \"${extensionPath}${CLAUDE_PLUGIN_ROOT}/hooks/reminder.sh\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${extensionPath}${CLAUDE_PLUGIN_ROOT}/hooks/reminder.sh\""
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh \"${extensionPath}${CLAUDE_PLUGIN_ROOT}/hooks/reminder.sh\""
           }
         ]
       }

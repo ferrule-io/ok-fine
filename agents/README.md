@@ -6,9 +6,11 @@
 
 Connects Claude Code, OpenAI Codex CLI, Gemini CLI, pi, and oh-my-pi (omp) to an
 [ok-fine](https://github.com/ferrule-io/ok-fine) knowledge server as shared project memory, without changing any
-file in your codebases. It ships three Agent Skills (`ok-fine`, `ok-fine-onboard`, `ok-fine-review`), a
-SessionStart hook for Claude Code, Codex, and Gemini CLI, and an extension for pi and omp that tell the agent
-which git repository it is in. See
+file in your codebases. It ships three Agent Skills (`ok-fine`, `ok-fine-onboard`, `ok-fine-review`), a hook for
+Claude Code, Codex, and Gemini CLI and an extension for pi and omp that tell the agent which git repository
+it is in and to look up its ok-fine project before planning or editing; the full reminder is injected at session
+start, then a one-line reminder on each prompt until the session has called an ok-fine lookup tool
+(`list_projects`, `search_concepts`, `read_concept`, `get_index`). See
 [Using ok-fine from coding agents](https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents) for the
 full lifecycle and identity-provider requirements.
 
