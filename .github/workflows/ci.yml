@@ -80,7 +80,7 @@ jobs:
               }
             }
           '
-          sh -n agents/hooks/session-start.sh
+          sh -n agents/hooks/reminder.sh
 
       - name: Run tests
         run: pnpm test
