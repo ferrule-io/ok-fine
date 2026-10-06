@@ -683,10 +683,7 @@ export class KnowledgeService {
       const prevStatus = existingRecord?.status;
 
       let frontmatter = args.frontmatter;
-      if (
-        this.config.defaultStaleAfterDays !== undefined &&
-        (!("stale_after" in args.frontmatter) || args.frontmatter.stale_after == null)
-      ) {
+      if (this.config.defaultStaleAfterDays !== undefined && !("stale_after" in args.frontmatter)) {
         frontmatter = {
           ...args.frontmatter,
           stale_after: isoAfterDays(new Date(), this.config.defaultStaleAfterDays),

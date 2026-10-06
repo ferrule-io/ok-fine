@@ -13,7 +13,7 @@ title: Use PostgreSQL for Persistent Relational Storage
 description: Select PostgreSQL as the primary relational datastore for orders and accounts.
 status: stable
 tags: [database, storage, postgresql]
-stale_after: 2027-04-03T00:00:00Z
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: adr-004
     resource: github.com/acme/shop/docs/adr/004-storage.md
@@ -39,7 +39,7 @@ title: Structured JSON Logging
 description: Emit all application log entries as newline-delimited JSON to stdout.
 status: stable
 tags: [logging, observability, conventions]
-stale_after: 2027-04-03T00:00:00Z
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: logging-config
     resource: github.com/acme/shop/src/logger.ts
@@ -65,7 +65,7 @@ title: Payment Processing Subsystem
 description: High-level topology and synchronous and asynchronous data flows for payments.
 status: stable
 tags: [architecture, payments, topology]
-stale_after: 2027-04-03T00:00:00Z
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: payment-spec
     resource: github.com/acme/shop/docs/architecture/payments.md
@@ -91,7 +91,7 @@ title: Checkout Worker
 description: Asynchronous queue worker processing order checkout jobs from the broker.
 status: stable
 tags: [component, checkout, worker]
-stale_after: 2027-04-03T00:00:00Z
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: worker-entry
     resource: github.com/acme/shop/src/workers/checkout.ts
@@ -118,7 +118,7 @@ title: Database Migration Rollback
 description: Operational procedure for safely rolling back a failed schema migration.
 status: stable
 tags: [playbook, database, migrations, operations]
-stale_after: 2027-04-03T00:00:00Z
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: migration-guide
     resource: github.com/acme/shop/docs/runbooks/migrations.md
@@ -153,7 +153,7 @@ title: Order Creation Endpoint
 description: REST HTTP endpoint for creating and validating customer orders.
 status: stable
 tags: [interface, api, rest, orders]
-stale_after: 2027-04-03T00:00:00Z
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: openapi-spec
     resource: github.com/acme/shop/src/api/orders.openapi.json
@@ -179,7 +179,7 @@ title: Stripe Webhook Replay Behavior
 description: Behavior and mitigation strategies for Stripe webhook duplicate deliveries.
 status: stable
 tags: [reference, stripe, webhooks, quirks]
-stale_after: 2027-04-03T00:00:00Z
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: incident-88
     resource: https://status.example.com/incidents/88
@@ -203,7 +203,7 @@ title: Idempotency Key
 description: Unique request identifier provided by clients to guarantee single execution.
 status: stable
 tags: [glossary, payments, transactions]
-stale_after: 2027-04-03T00:00:00Z
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: api-conventions
     resource: github.com/acme/shop/docs/api-conventions.md
@@ -229,7 +229,7 @@ tags:
   - database
   - storage
   - postgresql
-stale_after: 2027-04-03T00:00:00Z
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: adr-004
     resource: github.com/acme/shop/docs/adr/004-storage.md

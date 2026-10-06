@@ -25,7 +25,7 @@ Knowledge lives in ok-fine, never in repository files. Never write `AGENTS.md`, 
    - `git cat-file -e HEAD:<path>` fails → source moved or deleted (drifted).
    - `git log --oneline <commit>..HEAD -- <path>` non-empty → source changed (drifted).
    - Commit missing from local history (e.g. shallow clone) → drift unknown; treat as drifted (confirm against code).
-   A concept is fresh when not `stale` (not past `stale_after`) and has no drifted sources.
+   A concept is fresh when it has a `stale_after`, is not `stale` (not past `stale_after`), and has no drifted sources. A concept without `stale_after` counts as stale.
 5. Follow recall ordering:
    - Fresh, non-drifted concepts first; within those, trust tier (human-reviewed > machine-confirmed > unverified) as tiebreaker.
    - Stale or drifted concepts: check against code and refresh regardless of trust tier.

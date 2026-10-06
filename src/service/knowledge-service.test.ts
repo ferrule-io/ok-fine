@@ -798,7 +798,7 @@ title: Remote X
     expect(autoView.derived?.staleAfter).toBe(autoStaleAfter);
     expect(autoView.derived?.stale).toBe(false);
 
-    // Also verify when stale_after is explicitly null
+    // An explicit null is a producer value and is not replaced
     await configuredService.writeConcept(alice, {
       project: "proj-configured",
       id: "concepts/null-stale",
@@ -807,8 +807,8 @@ title: Remote X
       actor: "agent/1.0",
     });
     const nullView = await configuredService.readConcept("proj-configured", "concepts/null-stale");
-    expect(nullView.frontmatter?.stale_after).toBeDefined();
-    expect(typeof nullView.frontmatter?.stale_after).toBe("string");
+    expect(nullView.frontmatter?.stale_after).toBeNull();
+    expect(nullView.derived?.staleAfter).toBeNull();
 
     // (b) an explicit stale_after is kept unchanged
     const explicitTimestamp = "2030-01-01T00:00:00Z";
