@@ -11,7 +11,8 @@ export function extractLinks(body: string, conceptId: string): string[] {
   const seen = new Set<string>();
 
   marked.walkTokens(tokens, (token) => {
-    if (token.type !== "link") {
+    // marked has no footnote support: `[^id]` plus a `[^id]: x.md` definition lexes as a reference link.
+    if (token.type !== "link" || token.raw.startsWith("[^")) {
       return;
     }
 
