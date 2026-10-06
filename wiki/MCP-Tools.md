@@ -5,7 +5,7 @@ A client only sees the tools its token's scopes allow. Over stdio, every tool is
 | `list_projects` | read | Projects with counts and bound git repositories; `repository` filters to one codebase |
 | `get_index` | read | Directory listing: concepts by type, files, subdirectories |
 | `read_concept` | read | Frontmatter, body, derived trust/staleness, links, lint issues, `revision` |
-| `search_concepts` | read | Keyword search with filters (`project`, `type`, `tags`, `status`, `trustTier`, `stale`) |
+| `search_concepts` | read | Keyword search (`query` max 512 chars) with filters (`project`, `type`, `tags`, `status`, `trustTier`, `stale`) |
 | `get_history` | read | Git history of a concept or project |
 | `read_file` | read | Any text file verbatim (including `index.md`, `log.md`, assets) |
 | `lint_project` | read | OKF conformance report |
@@ -19,7 +19,7 @@ A client only sees the tools its token's scopes allow. Over stdio, every tool is
 | `delete_project` | admin | Remove a whole bundle (`confirm` must repeat the name) |
 | `sync_now` | admin | Fetch, rebase, and push to the git remote now |
 
-`search_concepts` hides `deprecated` concepts unless `status: "deprecated"` is requested.
+`search_concepts` hides `deprecated` concepts unless `status: "deprecated"` is requested. The `query` parameter is limited to 512 characters.
 
 # Optimistic concurrency
 

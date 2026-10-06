@@ -38,7 +38,7 @@ ok-fine [stdio|serve] [options]
 | `--port <port>` (serve) | `PORT` | `8080` |
 | `--host <addr>` (serve) | `HOST` | `127.0.0.1` |
 | `--public-base-url <url>` (serve) | `PUBLIC_BASE_URL` | `http://localhost:<port>` |
-| `--no-auth` (serve) | `AUTH_MODE=none` | off |
+| `--no-auth` (serve) | `AUTH_MODE=none` | off; refuses non-loopback `--host` without `ALLOW_UNAUTHENTICATED_NETWORK=true` |
 | `-h`, `--help` / `-v`, `--version` | | |
 
 Every variable in [Configuration](https://github.com/ferrule-io/ok-fine/wiki/Configuration) also works; flags win
@@ -89,4 +89,12 @@ ok-fine from (compared case-insensitively); with no email configured, `human:` a
 [Authentication and authorization](https://github.com/ferrule-io/ok-fine/wiki/Authentication-and-Authorization).
 
 > **Warning:** `--no-auth` (`AUTH_MODE=none`) disables authentication completely and gives every caller full admin
-> access. Keep `--host` on loopback.
+> access. Keep `--host` on loopback. `--no-auth` refuses to start on a non-loopback `--host`/`HOST` (127.0.0.0/8, ::1, localhost) unless `ALLOW_UNAUTHENTICATED_NETWORK=true` is set.
+
+# HTTP with Docker
+
+To run the container locally with authentication disabled behind a loopback port mapping, set `ALLOW_UNAUTHENTICATED_NETWORK=true` (since the container listens on `0.0.0.0`):
+
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 -e AUTH_MODE=none -e ALLOW_UNAUTHENTICATED_NETWORK=true -e PUBLIC_BASE_URL=http://localhost:8080 -v okf-data:/data ghcr.io/ferrule-io/ok-fine:latest
+```
