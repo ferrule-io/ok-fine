@@ -3,6 +3,9 @@ import { parseFrontmatter, splitFrontmatter } from "./frontmatter.js";
 import { computationBlocks, extractFootnoteLabels, extractLinks, hasLegacyCitations } from "./markdown.js";
 import { ISO_DATETIME, isStale, parseActor } from "./semantics.js";
 
+const COMMIT_RE = /^[0-9a-f]{7,64}$/i;
+const SHELL_META_OR_WHITESPACE = /[\s`$;|&<>()\\"'`]/;
+
 export interface LintIssue {
   severity: "error" | "warning" | "info";
   code: string;
@@ -240,6 +243,24 @@ export function lintConceptFile(
             path,
             message: "source must contain a non-empty string resource",
           });
+        } else if (SHELL_META_OR_WHITESPACE.test(src.resource)) {
+          issues.push({
+            severity: "warning",
+            code: "invalid_resource",
+            path,
+            message: "sources[].resource must not contain shell metacharacters or whitespace",
+          });
+        }
+
+        if ("commit" in src && src.commit != null) {
+          if (typeof src.commit !== "string" || !COMMIT_RE.test(src.commit)) {
+            issues.push({
+              severity: "warning",
+              code: "invalid_commit",
+              path,
+              message: "sources[].commit must be a 7-64 character hex string",
+            });
+          }
         }
 
         if ("id" in src && typeof src.id === "string" && src.id.trim().length > 0) {
