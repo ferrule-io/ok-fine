@@ -2,6 +2,7 @@ import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Logger } from "../config.js";
 import { OkfError } from "../errors.js";
+import { FEEDBACK_TYPES, feedbackLink } from "../service/feedback.js";
 import type { KnowledgeService } from "../service/knowledge-service.js";
 import type { Principal } from "../service/principal.js";
 import { VERSION } from "../version.js";
@@ -12,7 +13,8 @@ export const INSTRUCTIONS = `ok-fine holds shared project knowledge outside the 
 3. Write: write_concept with frontmatter containing \`type\` (e.g. Decision, Convention, Architecture, Component, Playbook, Interface, Reference) plus \`title\`, \`description\`, \`tags\`. Record provenance in \`sources\` (each with \`resource\` and a stable \`id\`) and cite claims with footnotes [^id]. Link concepts with bundle-absolute links such as [orders](/tables/orders.md).
 4. Pass \`actor\` as <harness>/<model> (e.g. claude-code/claude-opus-4-5, codex/gpt-5-codex, gemini-cli/gemini-2.5-pro). Use human:<email>, with the email from \`git config user.email\`, only when the user personally reviewed the concept; on forbidden_actor, report both identities instead of retrying as another. The server stamps \`generated\`; \`verified\` changes only through verify_concept.
 5. When updating, pass expectedRevision from read_concept (null to create only).
-6. Prefer \`status: deprecated\` over delete_concept. index.md and log.md are maintained by the server; do not write them. A project is bound to repositories through the \`repositories\` list in its overview frontmatter.`;
+6. Prefer \`status: deprecated\` over delete_concept. index.md and log.md are maintained by the server; do not write them. A project is bound to repositories through the \`repositories\` list in its overview frontmatter.
+7. If ok-fine itself misbehaves or lacks something you need, call submit_feedback and show the user the returned url; nothing is filed until they submit the prefilled GitHub issue.`;
 
 const project = z.string().describe("Project (bundle) name, e.g. payments-api");
 const id = z.string().describe("Concept ID = bundle-relative path without .md, e.g. tables/orders");
@@ -176,6 +178,31 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       annotations: readOnly,
     },
     (a) => service.lint(a.project),
+  );
+
+  tool(
+    "submit_feedback",
+    "read",
+    {
+      title: "Submit feedback",
+      description:
+        "Draft feedback about ok-fine itself (a bug, a confusing or missing tool, wrong results, or a feature gap) as a prefilled public GitHub issue on ferrule-io/ok-fine. This call files nothing: show the returned url to the user, who opens it, reviews it, and submits it with their own GitHub account. The issue is public: never include concept content, project names, repository URLs, credentials, or personal data. Not for problems in project knowledge; fix those with write_concept.",
+      inputSchema: z.object({
+        type: z.enum(FEEDBACK_TYPES).describe("bug | feature | general"),
+        title: z.string().min(5).max(160).describe("Short summary of the problem or request"),
+        body: z.string().min(20).max(6000).describe("What happened or what is needed, in detail"),
+        tool: z.string().max(100).optional().describe("ok-fine tool involved, e.g. write_concept"),
+        expected: z.string().max(2000).optional().describe("Expected behavior"),
+        actual: z.string().max(2000).optional().describe("Actual behavior, including any error code returned"),
+        reproduction: z
+          .string()
+          .max(2000)
+          .optional()
+          .describe("Minimal steps a maintainer can replay, with no private data"),
+      }),
+      annotations: readOnly,
+    },
+    (a) => feedbackLink(a),
   );
 
   tool(

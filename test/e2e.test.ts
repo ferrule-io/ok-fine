@@ -66,6 +66,7 @@ const ALL_TOOLS = [
   "read_concept",
   "read_file",
   "search_concepts",
+  "submit_feedback",
   "sync_now",
   "verify_concept",
   "write_concept",
@@ -118,6 +119,7 @@ describe("ok-fine end to end", () => {
         "read_concept",
         "read_file",
         "search_concepts",
+        "submit_feedback",
       ].sort(),
     );
     await client.close();
