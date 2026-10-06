@@ -87,8 +87,10 @@ class GitTx implements StorageTx {
       } else {
         await rm(projectDir, { recursive: true, force: true });
       }
-    } catch {
-      // not exists
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
     }
     this.index.setProject(project, []);
     this.touched = true;
@@ -103,8 +105,10 @@ class GitTx implements StorageTx {
       } else {
         await rm(projectDir, { recursive: true, force: true });
       }
-    } catch {
-      // not exists
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
     }
     const written: string[] = [];
     for (const path of source.paths) {
@@ -151,6 +155,7 @@ export class GitBackend implements StorageBackend {
 
   async close(): Promise<void> {
     await this.mutex.idle();
+    await this.git.close();
   }
 
   async projects(): Promise<string[]> {
@@ -383,8 +388,10 @@ export class GitBackend implements StorageBackend {
       } else {
         attrContent = await readFile(gitattributesPath, "utf8");
       }
-    } catch {
-      // not exists
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
     }
 
     const requiredAttrLines = ["**/index.md merge=union", "**/log.md merge=union"];
@@ -414,8 +421,10 @@ export class GitBackend implements StorageBackend {
       } else {
         ignoreContent = await readFile(gitignorePath, "utf8");
       }
-    } catch {
-      // not exists
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
     }
 
     const requiredIgnoreLine = ".*.tmp";

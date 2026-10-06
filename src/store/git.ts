@@ -23,7 +23,7 @@ export class GitError extends Error {
 }
 
 export function redactRemote(url: string): string {
-  return url.replace(/(https?:\/\/)[^/@\s]+@/g, "$1");
+  return url.replace(/([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)[^/@\s]+@/g, "$1");
 }
 
 export function redactArgs(args: string[], configuredRemote?: string): string[] {
@@ -73,13 +73,7 @@ export function redactArgs(args: string[], configuredRemote?: string): string[] 
 }
 
 export function redactStderr(stderr: string): string {
-  const newlineIndex = stderr.indexOf("\n");
-  const firstLine = newlineIndex === -1 ? stderr : stderr.slice(0, newlineIndex);
-  if (/(https?:\/\/)[^/@\s]+@/.test(firstLine)) {
-    const redactedFirstLine = redactRemote(firstLine);
-    return newlineIndex === -1 ? redactedFirstLine : redactedFirstLine + stderr.slice(newlineIndex);
-  }
-  return stderr;
+  return redactRemote(stderr);
 }
 
 export function isPushRejection(stderr: string): boolean {
@@ -181,7 +175,7 @@ export class Git {
     ];
 
     if (!config.gitHostEnv) {
-      this.baseArgs.push("-c", "core.sshCommand=");
+      this.baseArgs.push("-c", "core.sshCommand=ssh");
     }
 
     if (config.gitHttpUsername && config.gitHttpPassword) {
@@ -228,19 +222,12 @@ export class Git {
     await copyFile(this.config.gitSshKeyPath, targetKeyPath);
     await chmod(targetKeyPath, 0o600);
 
-    let sshCmd = `ssh -i "${targetKeyPath}" -o IdentitiesOnly=yes -o BatchMode=yes`;
-    // The chart always sets the path; the Secret key is optional, so strict mode requires the file to exist.
     const knownHosts = this.config.gitSshKnownHostsPath;
-    if (knownHosts) {
-      if (!(await pathExists(knownHosts))) {
-        throw new Error(`Configured known_hosts file does not exist: ${knownHosts}`);
-      }
-      sshCmd += ` -o UserKnownHostsFile="${knownHosts}" -o StrictHostKeyChecking=yes`;
-    } else {
-      sshCmd += ` -o UserKnownHostsFile="${join(this.sshTempDir, "known_hosts")}" -o StrictHostKeyChecking=accept-new`;
+    if (!knownHosts || !(await pathExists(knownHosts))) {
+      throw new Error(`Configured known_hosts file does not exist: ${knownHosts}`);
     }
 
-    this.env.GIT_SSH_COMMAND = sshCmd;
+    this.env.GIT_SSH_COMMAND = `ssh -i "${targetKeyPath}" -o IdentitiesOnly=yes -o BatchMode=yes -o UserKnownHostsFile="${knownHosts}" -o StrictHostKeyChecking=yes`;
   }
 
   run(

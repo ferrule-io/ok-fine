@@ -294,4 +294,31 @@ describe("GitBackend", () => {
 
     await storage.close();
   });
+
+  it("cleans up temporary SSH directory on close", async () => {
+    const keyPath = join(dataDir, "test_id_ed25519");
+    await writeFile(keyPath, "dummy-ssh-key-content");
+
+    const knownHostsPath = join(dataDir, "test_known_hosts");
+    await writeFile(knownHostsPath, "dummy-known-hosts");
+
+    const config = loadStorageConfig({
+      DATA_DIR: join(dataDir, "storage-data"),
+      GIT_SSH_KEY_PATH: keyPath,
+      GIT_SSH_KNOWN_HOSTS_PATH: knownHostsPath,
+      LOG_LEVEL: "silent",
+    });
+
+    const storage = await GitBackend.open(config, log);
+    const tempKeyPath = storage.git.sshKeyPath;
+    expect(tempKeyPath).toBeDefined();
+    if (!tempKeyPath) {
+      throw new Error("expected sshKeyPath to be defined");
+    }
+    expect(await pathExists(tempKeyPath)).toBe(true);
+
+    await storage.close();
+
+    expect(await pathExists(tempKeyPath)).toBe(false);
+  });
 });

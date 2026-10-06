@@ -176,8 +176,29 @@ const httpEnvShape = {
   TRUST_PROXY: z.string().optional(),
 };
 
+function isValidGitRemoteUrl(url: string): boolean {
+  if (url.startsWith("/") || url.startsWith("https://") || url.startsWith("ssh://") || url.startsWith("file://")) {
+    return true;
+  }
+  if (!url.includes("://")) {
+    const at = url.indexOf("@");
+    const colon = url.indexOf(":");
+    if (at !== -1 && colon !== -1 && at < colon) {
+      const slash = url.indexOf("/");
+      return slash === -1 || slash > colon;
+    }
+  }
+  return false;
+}
+
 function refineGitCredentials(
-  data: { GIT_HTTP_USERNAME?: string | undefined; GIT_HTTP_PASSWORD?: string | undefined },
+  data: {
+    GIT_HTTP_USERNAME?: string | undefined;
+    GIT_HTTP_PASSWORD?: string | undefined;
+    GIT_REMOTE_URL?: string | undefined;
+    GIT_SSH_KEY_PATH?: string | undefined;
+    GIT_SSH_KNOWN_HOSTS_PATH?: string | undefined;
+  },
   ctx: z.RefinementCtx,
 ): void {
   if (!data || typeof data !== "object") return;
@@ -186,6 +207,20 @@ function refineGitCredentials(
       code: "custom",
       path: ["GIT_HTTP_USERNAME"],
       message: "GIT_HTTP_USERNAME and GIT_HTTP_PASSWORD must be provided together or neither",
+    });
+  }
+  if (data.GIT_REMOTE_URL !== undefined && !isValidGitRemoteUrl(data.GIT_REMOTE_URL)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["GIT_REMOTE_URL"],
+      message: "GIT_REMOTE_URL must be https://, ssh://, user@host:path, file:// or an absolute path",
+    });
+  }
+  if (data.GIT_SSH_KEY_PATH?.trim() && !data.GIT_SSH_KNOWN_HOSTS_PATH?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["GIT_SSH_KNOWN_HOSTS_PATH"],
+      message: "GIT_SSH_KNOWN_HOSTS_PATH is required when GIT_SSH_KEY_PATH is set",
     });
   }
 }

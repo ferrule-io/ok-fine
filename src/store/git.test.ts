@@ -67,7 +67,7 @@ describe("Git", () => {
     expect(caught?.args).toEqual(["commit", "-m", "<message>", "-m", "<message>"]);
   });
 
-  it("redacts first stderr line only if it contains userinfo", () => {
+  it("redacts userinfo on every stderr line", () => {
     const withUserinfo =
       "fatal: unable to access 'https://user:password@github.com/org/repo.git': Failed to connect\nsome detail";
     const redacted = redactStderr(withUserinfo);
@@ -79,7 +79,14 @@ describe("Git", () => {
     expect(redactStderr(withoutUserinfo)).toBe(withoutUserinfo);
 
     const userinfoOnSecondLine = "error: something failed\nfatal: https://user:password@github.com/repo";
-    expect(redactStderr(userinfoOnSecondLine)).toBe(userinfoOnSecondLine);
+    const redactedSecond = redactStderr(userinfoOnSecondLine);
+    expect(redactedSecond).not.toContain("password");
+    expect(redactedSecond).toBe("error: something failed\nfatal: https://github.com/repo");
+
+    const userinfoOnLaterLine = "line 1\nline 2\nfatal: https://token:secret@github.com/repo\nline 4";
+    const redactedLater = redactStderr(userinfoOnLaterLine);
+    expect(redactedLater).not.toContain("secret");
+    expect(redactedLater).toBe("line 1\nline 2\nfatal: https://github.com/repo\nline 4");
   });
 
   it("redacts configured remote matching arg from GitError message", async () => {
@@ -117,6 +124,8 @@ describe("Git", () => {
   it("puts ssh key under os.tmpdir() instead of DATA_DIR and removes stale key", async () => {
     const keyPath = join(dataDir, "test_id_ed25519");
     await writeFile(keyPath, "dummy-ssh-key-content");
+    const knownHostsPath = join(dataDir, "test_known_hosts");
+    await writeFile(knownHostsPath, "dummy-known-hosts");
 
     // Put a stale key in DATA_DIR/home/.ssh/id_okf
     const staleSshDir = join(homeDir, ".ssh");
@@ -127,6 +136,7 @@ describe("Git", () => {
     const config = loadStorageConfig({
       DATA_DIR: dataDir,
       GIT_SSH_KEY_PATH: keyPath,
+      GIT_SSH_KNOWN_HOSTS_PATH: knownHostsPath,
     });
     git = new Git(repoDir, homeDir, config);
 
@@ -139,16 +149,20 @@ describe("Git", () => {
     const sshCommand = git.env.GIT_SSH_COMMAND;
     expect(sshCommand).toBeDefined();
     expect(sshCommand).toContain("-i ");
-    expect(sshCommand).not.toContain(dataDir);
-    expect(sshCommand).toContain(tmpdir());
-    expect(sshCommand).toContain("StrictHostKeyChecking=accept-new");
+    expect(git.sshKeyPath).toBeDefined();
+    expect(git.sshKeyPath?.startsWith(tmpdir())).toBe(true);
+    expect(git.sshKeyPath?.startsWith(dataDir)).toBe(false);
+    expect(sshCommand).toContain(`-i "${git.sshKeyPath}"`);
+    expect(sshCommand).toContain("StrictHostKeyChecking=yes");
+    expect(sshCommand).toContain(`UserKnownHostsFile="${knownHostsPath}"`);
 
     const keyMatch = /-i "([^"]+)"/.exec(sshCommand ?? "");
     expect(keyMatch).not.toBeNull();
     const copiedKeyPath = keyMatch?.[1] ?? "";
+    expect(copiedKeyPath).toBe(git.sshKeyPath);
     expect(copiedKeyPath.startsWith(tmpdir())).toBe(true);
+    expect(copiedKeyPath.startsWith(dataDir)).toBe(false);
     expect(await pathExists(copiedKeyPath)).toBe(true);
-
     // Verify file and directory permissions
     const fileStat = await stat(copiedKeyPath);
     expect(fileStat.mode & 0o777).toBe(0o600);
@@ -183,7 +197,7 @@ describe("Git", () => {
     expect(extAllow.stdout.trim()).toBe("never");
 
     const sshCmd = await git.run(["config", "core.sshCommand"]);
-    expect(sshCmd.stdout.trim()).toBe("");
+    expect(sshCmd.stdout.trim()).toBe("ssh");
   });
 
   it("does not neutralize core.sshCommand when gitHostEnv is set, but keeps fsmonitor and protocol hardening", async () => {

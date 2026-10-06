@@ -119,6 +119,31 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...required, GIT_HTTP_USERNAME: "u", GIT_HTTP_PASSWORD: "p" }).gitHttpPassword).toBe("p");
   });
 
+  it.each(["http://example.com/repo.git", "git://example.com/repo.git", "relative/path"])(
+    "rejects invalid remote URL %s",
+    (url) => {
+      expect(() => loadConfig({ ...required, GIT_REMOTE_URL: url })).toThrow(
+        "GIT_REMOTE_URL must be https://, ssh://, user@host:path, file:// or an absolute path",
+      );
+    },
+  );
+
+  it.each([
+    "https://example.com/repo.git",
+    "ssh://git@example.com/repo.git",
+    "git@github.com:o/r.git",
+    "file:///x",
+    "/abs",
+  ])("accepts valid remote URL %s", (url) => {
+    expect(loadConfig({ ...required, GIT_REMOTE_URL: url }).gitRemoteUrl).toBe(url);
+  });
+
+  it("rejects GIT_SSH_KEY_PATH without GIT_SSH_KNOWN_HOSTS_PATH", () => {
+    expect(() => loadConfig({ ...required, GIT_SSH_KEY_PATH: "/path/to/key" })).toThrow(
+      "GIT_SSH_KNOWN_HOSTS_PATH is required when GIT_SSH_KEY_PATH is set",
+    );
+  });
+
   it("loads optional DEFAULT_STALE_AFTER_DAYS when unset, empty, or valid", () => {
     expect(loadConfig(required).defaultStaleAfterDays).toBeUndefined();
     expect(loadConfig({ ...required, DEFAULT_STALE_AFTER_DAYS: "" }).defaultStaleAfterDays).toBeUndefined();
