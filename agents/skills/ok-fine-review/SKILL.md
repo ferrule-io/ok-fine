@@ -54,9 +54,10 @@ description: "Review and maintain this repository's ok-fine knowledge: find non-
    - Check the concept against the codebase to ensure complete accuracy.
    - Call `verify_concept` with `project`, `id`, `actor: <harness>/<model>`, and `expectedRevision: <revision>`.
 2. Human verification (human-reviewed):
-   - Use `actor: "human:<id>"` only when the user explicitly confirms personal review of the concept.
-   - Ask the user for their username or identifier.
-   - If the server rejects the call with a `forbidden_actor` error naming the allowed identity (e.g. `this token may only act as human:<id>`), confirm with the user and call `verify_concept` using that identity.
+   - Use a `human:` actor only when the user explicitly confirms personal review of the concept.
+   - Derive the actor as `human:<email>` from `git config user.email`. Do not ask the user for an identifier.
+   - If `git config user.email` is empty, stop and report that human verification needs a git email.
+   - If the server rejects the call with `forbidden_actor` (e.g. `this token may only act as human:<id>`), stop and report both values: the local git email and the token identity named in the error. Never retry as a different identity.
 
 ## 6. Report
 1. Report all applied changes: updated concepts, deprecated concepts, deleted concepts, and recorded verifications.

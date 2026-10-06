@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -123,7 +124,14 @@ describe("ok-fine end to end", () => {
   });
 
   it("creates, writes, reads, searches, and verifies over MCP", async () => {
-    const client = await connect(await issuer.mintToken({ scope: "okf:read okf:write okf:admin", username: "alice" }));
+    // The IdP issues both preferred_username and email; human: actors bind to the email.
+    const client = await connect(
+      await issuer.mintToken({
+        scope: "okf:read okf:write okf:admin",
+        username: "alice",
+        claims: { email: "Alice@Example.com" },
+      }),
+    );
     const created = await call(client, "create_project", { project: "demo", title: "Demo", actor: "e2e/1.0" });
     expect(created.isError).toBeFalsy();
 
@@ -156,13 +164,15 @@ describe("ok-fine end to end", () => {
     const verified = await call<{ trustTier: string }>(client, "verify_concept", {
       project: "demo",
       id: "tables/orders",
-      actor: "human:alice",
+      actor: "human:alice@example.com",
     });
     expect(verified.structuredContent.trustTier).toBe("human-reviewed");
+    const author = execFileSync("git", ["log", "-1", "--format=%an <%ae>"], { cwd: path.join(dataDir, "repo") });
+    expect(author.toString("utf8").trim()).toBe("human:alice@example.com <alice@example.com>");
 
-    const forged = await call(client, "verify_concept", { project: "demo", id: "tables/orders", actor: "human:bob" });
+    const forged = await call(client, "verify_concept", { project: "demo", id: "tables/orders", actor: "human:alice" });
     expect(forged.isError).toBe(true);
-    expect(forged.content[0]?.text.startsWith("forbidden_actor:")).toBe(true);
+    expect(forged.content[0]?.text).toBe("forbidden_actor: this token may only act as human:Alice@Example.com");
     await client.close();
   });
 

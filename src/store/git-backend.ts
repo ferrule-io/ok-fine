@@ -5,6 +5,7 @@ import type { Config, Logger } from "../config.js";
 import { OkfError } from "../errors.js";
 import { nowIso } from "../okf/frontmatter.js";
 import { PROJECT_RE } from "../okf/paths.js";
+import { parseActor } from "../okf/semantics.js";
 import type {
   BundleSource,
   CommitSpec,
@@ -453,7 +454,10 @@ export class GitBackend implements StorageBackend {
           const diffCheck = await this.git.run(["diff", "--cached", "--quiet"], { allowFail: true });
           if (diffCheck.code !== 0) {
             const c = workRes.commit;
-            const commitArgs = ["commit", `--author=${c.author} <ok-fine@localhost>`, "-m", c.subject];
+            // human:<email> writes carry the person's own email so bundle history matches their code commits.
+            const actor = parseActor(c.author);
+            const authorEmail = actor?.kind === "human" && actor.id.includes("@") ? actor.id : "ok-fine@localhost";
+            const commitArgs = ["commit", `--author=${c.author} <${authorEmail}>`, "-m", c.subject];
             if (c.body && c.body.trim().length > 0) {
               commitArgs.push("-m", c.body);
             }

@@ -25,7 +25,7 @@ oauth:               # used only when auth.mode=oidc
     read: okf:read
     write: okf:write
     admin: okf:admin
-  identityClaims: [preferred_username, email, sub]
+  identityClaims: [email, preferred_username, sub]
   allowInsecureIssuer: false   # development only (http:// issuer)
 git:
   branch: main

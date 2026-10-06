@@ -9,7 +9,7 @@ variable.
 | `OAUTH_AUDIENCE` | `<PUBLIC_BASE_URL>/mcp` | Comma-separated accepted audiences (`oidc` mode only) |
 | `OAUTH_JWKS_URI` | discovered | Override the JWKS URL (`oidc` mode only) |
 | `OAUTH_SCOPE_READ` / `_WRITE` / `_ADMIN` | `okf:read` / `okf:write` / `okf:admin` | Scope names (granted to anonymous principal in `none` mode) |
-| `OAUTH_IDENTITY_CLAIMS` | `preferred_username,email,sub` | Claims tried in order for `human:<id>` binding (`oidc` mode only) |
+| `OAUTH_IDENTITY_CLAIMS` | `email,preferred_username,sub` | Claims tried in order for `human:<id>` binding (`oidc` mode only) |
 | `OAUTH_ALLOW_INSECURE_ISSUER` | `false` | Allow an `http://` issuer (development only, `oidc` mode only) |
 | `PORT` | `8080` | |
 | `HOST` | `0.0.0.0` | |
