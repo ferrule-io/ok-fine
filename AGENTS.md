@@ -30,7 +30,7 @@ Dependencies point downward only:
 | Storage | `src/store/` | `StorageBackend` contract (`backend.ts`), its git implementation (`git-backend.ts`), bundle model, in-memory catalog/search, archives. |
 | Service | `src/service/knowledge-service.ts` | One method per operation. MCP and REST must both call this; never put business logic in transports. Depends only on `StorageBackend`: no repo paths or fs calls except import staging under `DATA_DIR/tmp`. |
 | Transport | `src/mcp/`, `src/http/` | Input validation (zod), permission checks, response shaping. |
-| Wiring | `src/server.ts` | `startServer(config)` (HTTP) and `startStdioServer(config, options)`. Shared by `src/main.ts` (container), `src/cli.ts` (npm bin), and `test/e2e.test.ts`; keep all wiring here. |
+| Wiring | `src/server.ts`, `src/local-host.ts`, `src/stdio-proxy.ts` | `startServer(config)` (HTTP), lock-holder host (`src/local-host.ts`), and stdio socket proxies (`src/stdio-proxy.ts`). Shared by `src/main.ts` (container), `src/cli.ts` (npm bin), and tests; keep all wiring here. |
 | Auth | `src/auth/` | JWT resource server. ok-fine never issues tokens. |
 | Web UI | `web/` | Read-only SPA built into `dist/ui` and served from memory by `src/http/ui.ts`. Reads only through `/api/v1`; runtime code imports only types from `src/`. `web/src/auth/flow.ts` stays DOM-free (the e2e test runs it). |
 | Dev only | `src/dev/` | Unauthenticated token issuer for tests and local runs. Never wire it into the server. |
@@ -67,9 +67,12 @@ Break any of these and you have a bug.
 - **Single replica:** the design assumes one process per data volume (RWO PVC, in-process mutex). Don't add
   horizontal scaling without replacing the locking model.
 - **Stdio:** stdout carries only MCP JSON-RPC; the CLI logs to stderr. Never `console.log` in code reachable from
-  `startStdioServer`.
-- **Local CLI:** `lockDataDir` enforces one process per data dir; host git env (`gitHostEnv`) is CLI-only, so the
-  container keeps git isolated under `DATA_DIR/home`.
+  stdio proxies or the local host.
+- **Local CLI:** exactly one process per data dir (the lock holder, or host; `src/local-host.ts`) opens storage and
+  the service, preserving the single-writer invariant. Any number of concurrent stdio sessions run as socket proxies
+  (`src/stdio-proxy.ts`) connecting to the host via a local socket (`DATA_DIR/ok-fine.sock`, owner-only) with
+  automatic failover if the host exits. The socket grants the full local principal, so `serve` hosts it only with
+  `AUTH_MODE=none`. Host git env (`gitHostEnv`) is CLI-only, so the container keeps git isolated under `DATA_DIR/home`.
 - **Agent-facing text:** tool names and parameters referenced in `agents/` and `INSTRUCTIONS` (`src/mcp/server.ts`)
   must match the registered tools. Agent-facing text must never instruct writing files into a consumer codebase.
 

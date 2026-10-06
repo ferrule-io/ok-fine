@@ -5,7 +5,8 @@ import { pino } from "pino";
 import { type CliInvocation, parseCli, USAGE } from "./cli-options.js";
 import { type Config, loadConfig, loadStorageConfig, type StorageConfig } from "./config.js";
 import { lockDataDir } from "./data-dir-lock.js";
-import { type RunningServer, type RunningStdioServer, startServer, startStdioServer } from "./server.js";
+import { type RunningServer, startLocalHost, startServer } from "./server.js";
+import { type RunningStdioProxy, startStdioProxy } from "./stdio-proxy.js";
 import { VERSION } from "./version.js";
 
 const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -65,30 +66,27 @@ if (inv.command === "stdio") {
   // stdout carries JSON-RPC only; every log line goes to stderr.
   const log = pino({ level: config.logLevel }, pino.destination({ dest: 2, sync: true }));
 
-  try {
-    const release = await lockDataDir(config.dataDir);
-    process.once("exit", release);
-  } catch (err) {
-    log.error(message(err));
-    process.exit(1);
-  }
-
   const identity = await localGitEmail(inv.env);
   log.info({ dataDir: config.dataDir, identity }, "serving MCP over stdio");
 
-  let server: RunningStdioServer;
+  let proxy: RunningStdioProxy;
   try {
-    server = await startStdioServer(config, { log, identity });
+    proxy = await startStdioProxy({
+      config,
+      identity,
+      log,
+      startHost: () => startLocalHost(config, { log }),
+    });
   } catch (err) {
     log.error({ err }, "ok-fine failed to start");
     process.exit(1);
   }
 
   const shutdown = shutdownOnce(
-    () => server.close(),
+    () => proxy.close(),
     (err) => log.error({ err }, "shutdown failed"),
   );
-  void server.done.then(shutdown);
+  void proxy.done.then(shutdown);
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
 } else {
@@ -110,7 +108,7 @@ if (inv.command === "stdio") {
 
   let server: RunningServer;
   try {
-    server = await startServer(config);
+    server = await startServer(config, { hostEndpoint: config.auth.mode === "none" });
   } catch (err) {
     console.error("ok-fine failed to start:", err);
     process.exit(1);

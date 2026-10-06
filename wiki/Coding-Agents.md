@@ -63,8 +63,7 @@ Requires Node.js 24+ and git.
 - Install the agent package as in the table below; there is no login step.
 - Flags go after the package name, e.g. `npx -y @ferrule-io/ok-fine --remote git@github.com:acme/knowledge.git`.
   Gemini CLI uses `settings.json` because `gemini mcp add` would parse `-y` itself.
-- One process serves a data directory, so concurrent sessions need `npx -y @ferrule-io/ok-fine serve --no-auth`
-  running once and the HTTP rows below with `http://localhost:8080/mcp` and no login. (Note that `serve --no-auth` is loopback-only and refuses to start on or accept traffic from non-loopback interfaces.)
+- Any number of agent sessions can use this stdio setup at the same time on the same data directory. The first session hosts the knowledge base and additional sessions connect to it via an owner-only local socket (`DATA_DIR/ok-fine.sock`), with automatic failover if the host exits (see [Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally#several-sessions-at-once)).
 
 # Per-harness setup (shared server)
 

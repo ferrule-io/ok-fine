@@ -1,5 +1,5 @@
 Locally, clients can start ok-fine themselves over stdio, with no server, URL, or authentication (see
-[Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally)):
+[Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally)). Any number of concurrent sessions can share the same data directory with no extra configuration:
 
 ```json
 {

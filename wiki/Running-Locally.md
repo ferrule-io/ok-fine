@@ -1,13 +1,13 @@
 ok-fine is published to npm as [`@ferrule-io/ok-fine`](https://www.npmjs.com/package/@ferrule-io/ok-fine). The
-package's `ok-fine` command runs the server on your machine without Docker: over stdio for one agent session, or
-over HTTP (`ok-fine serve`) for several.
+package's `ok-fine` command runs the server on your machine without Docker: over stdio for agent sessions, or
+over HTTP (`ok-fine serve`) for the web UI, REST API, and HTTP MCP clients.
 
 # Requirements
 
 - Node.js 24 or newer, and `git`.
 - macOS or Linux. On Windows, use WSL.
 
-# Stdio for one agent session
+# Stdio for agent sessions
 
 ```sh
 npx -y @ferrule-io/ok-fine
@@ -61,20 +61,13 @@ absolute local path (insecure `http://` and relative paths are rejected).
 
 # Several sessions at once
 
-One process serves a data directory. A second `ok-fine` started on the same data directory exits with
-`ok-fine is already running on … (pid …)`. To share one knowledge base between concurrent sessions, run the HTTP
-server once:
+Any number of agent sessions can use the plain `npx -y @ferrule-io/ok-fine` stdio configuration at once on the same data directory. There is no need to run a background daemon or change harness settings for concurrent sessions.
 
-```sh
-npx -y @ferrule-io/ok-fine serve --no-auth
-```
+The first session to start takes the exclusive lock (`~/.ok-fine/ok-fine.lock`, holding the process ID) and hosts the knowledge base. Subsequent sessions connect to the host through an owner-only local socket (`DATA_DIR/ok-fine.sock`, or a named pipe on Windows). If the hosting session ends, another session takes over the lock and becomes the host automatically. Any request in flight at the moment of failover returns a JSON-RPC error instructing the client to retry.
 
-and point every client at `http://localhost:8080/mcp` (the HTTP rows in
-[Coding agents](https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents#per-harness-setup-shared-server), with no
-login step). Or give each session its own `--data-dir`.
+`ok-fine serve` remains for the read-only web UI, the REST API, and HTTP MCP clients. When `ok-fine serve --no-auth` is running, stdio sessions automatically attach to it through the same local socket; with OIDC authentication `serve` does not open the socket, so stdio sessions cannot bypass it. `ok-fine serve` cannot start while a stdio session is hosting that data directory (close the stdio sessions or specify a different `--data-dir`).
 
-The lock is the file `~/.ok-fine/ok-fine.lock`, holding the process ID. A lock left by a crashed process is taken
-over automatically; if the message names a process that is not ok-fine, delete the file.
+A lock left by an exited or crashed process is taken over automatically; if `serve` reports a lock held by a live process that is not ok-fine, delete the lock file.
 
 # Identity and actors
 
