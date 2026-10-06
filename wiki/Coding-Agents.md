@@ -93,6 +93,6 @@ Knowledge about work on an unmerged branch or PR is recorded as a proposal (`pro
 
 - **Recall ordering:** Concepts carrying `proposal` are not current truth; they rank after current (fresh and stale/drifted) concepts and before deprecated ones. They are exempt from drift refresh while the branch is unmerged.
 - **Resolving:** a proposal has landed once what it describes is grounded in the mainline (the branch the team integrates into, e.g. the remote's default branch): its source commits are ancestors of the mainline, or the code it describes is present there. `ref` is any URI (pull/merge request, branch, ticket, …) and only a hint that the agent may interpret with whatever tools its environment offers.
-  - *Landed:* create `decisions/<slug>` (`status: stable`, no `proposal` key, sources pointing at HEAD) and refresh the linked current-state concepts against HEAD. Deprecating the old proposal (`status: deprecated` with a successor link to `decisions/<slug>`) is proposed for explicit user confirmation.
+  - *Landed:* create `decisions/<slug>` (`status: stable`, no `proposal` key) and refresh the linked current-state concepts, both confirmed against the mainline with sources at the mainline commit (not a feature branch's HEAD). Deprecating the old proposal (`status: deprecated` with a successor link to `decisions/<slug>`) is proposed for explicit user confirmation.
   - *Abandoned* (nothing landed and the evidence shows the work was dropped): propose `status: deprecated` to the user; apply only on confirmation.
   - *Otherwise:* leave the proposal as-is.
