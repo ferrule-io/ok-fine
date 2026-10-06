@@ -103,7 +103,8 @@ jobs:
 
   image:
     name: Build image (${{ matrix.arch }})
-    if: github.event_name != 'pull_request'
+    # Release builds and pushes the real images on main; this dry-run only warms the cache on development.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/development'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
