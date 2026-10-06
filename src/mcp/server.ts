@@ -10,7 +10,7 @@ export const INSTRUCTIONS = `ok-fine holds shared project knowledge outside the 
 1. Discover: get_index (progressive disclosure) or search_concepts with \`project\`.
 2. Read: read_concept returns frontmatter, body, trust tier (unverified | machine-confirmed | human-reviewed), staleness, and links. Prefer human-reviewed, non-stale concepts; deprecated concepts are history; when code contradicts a concept, trust the code and update the concept.
 3. Write: write_concept with frontmatter containing \`type\` (e.g. Decision, Convention, Architecture, Component, Playbook, Interface, Reference) plus \`title\`, \`description\`, \`tags\`. Record provenance in \`sources\` (each with \`resource\` and a stable \`id\`) and cite claims with footnotes [^id]. Link concepts with bundle-absolute links such as [orders](/tables/orders.md).
-4. Pass \`actor\` as <harness>/<model> (e.g. claude-code/claude-opus-4-5, codex/gpt-5-codex, gemini-cli/gemini-2.5-pro). Use human:<id> only when the user personally reviewed the concept. The server stamps \`generated\`; \`verified\` changes only through verify_concept.
+4. Pass \`actor\` as <harness>/<model> (e.g. claude-code/claude-opus-4-5, codex/gpt-5-codex, gemini-cli/gemini-2.5-pro). Use human:<email>, with the email from \`git config user.email\`, only when the user personally reviewed the concept; on forbidden_actor, report both identities instead of retrying as another. The server stamps \`generated\`; \`verified\` changes only through verify_concept.
 5. When updating, pass expectedRevision from read_concept (null to create only).
 6. Prefer \`status: deprecated\` over delete_concept. index.md and log.md are maintained by the server; do not write them. A project is bound to repositories through the \`repositories\` list in its overview frontmatter.`;
 
@@ -19,7 +19,7 @@ const id = z.string().describe("Concept ID = bundle-relative path without .md, e
 const actor = z
   .string()
   .describe(
-    "Who is writing, per the OKF actor convention: <producer>/<version> for agents (e.g. claude-code/claude-opus-4-5), human:<id> only for your own token identity, or process:<id>",
+    "Who is writing, per the OKF actor convention: <producer>/<version> for agents (e.g. claude-code/claude-opus-4-5), human:<email> (the user's `git config user.email`, matching their token identity) only for personal review, or process:<id>",
   );
 const expectedRevision = z
   .string()

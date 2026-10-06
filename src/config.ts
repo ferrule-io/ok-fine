@@ -79,7 +79,7 @@ const rawEnvSchema = z
     OAUTH_SCOPE_READ: z.string().default("okf:read"),
     OAUTH_SCOPE_WRITE: z.string().default("okf:write"),
     OAUTH_SCOPE_ADMIN: z.string().default("okf:admin"),
-    OAUTH_IDENTITY_CLAIMS: z.string().default("preferred_username,email,sub"),
+    OAUTH_IDENTITY_CLAIMS: z.string().default("email,preferred_username,sub"),
     OAUTH_ALLOW_INSECURE_ISSUER: z.string().optional(),
     GIT_BRANCH: z.string().default("main"),
     GIT_REMOTE_URL: z.string().optional(),

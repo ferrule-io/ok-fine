@@ -12,7 +12,7 @@ describe("loadConfig", () => {
       mode: "oidc",
       issuer: "https://idp.example.com",
       audiences: ["https://okf.example.com/mcp"],
-      identityClaims: ["preferred_username", "email", "sub"],
+      identityClaims: ["email", "preferred_username", "sub"],
       allowInsecureIssuer: false,
     });
     expect(config.gitSyncIntervalSeconds).toBe(60);

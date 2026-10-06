@@ -21,7 +21,11 @@ export function checkActor(actor: string, p: Principal): string {
     if (p.identity === null) {
       throw new OkfError("forbidden_actor", 403, "this token carries no identity claim; human: actors are not allowed");
     }
-    if (parsed.id !== p.identity) {
+    // Email identities compare case-insensitively; any other identity must match exactly.
+    const matches = p.identity.includes("@")
+      ? parsed.id.toLowerCase() === p.identity.toLowerCase()
+      : parsed.id === p.identity;
+    if (!matches) {
       throw new OkfError("forbidden_actor", 403, `this token may only act as human:${p.identity}`);
     }
   }

@@ -52,10 +52,11 @@ Every write names an **actor** following the OKF convention:
 | Form | Example | Use |
 |---|---|---|
 | `<producer>/<version>` | `claude-code/claude-opus-4-5` | agents and tools |
-| `human:<id>` | `human:alice` | a person; `<id>` must equal the caller's token identity |
+| `human:<id>` | `human:alice@example.com` | a person; `<id>` is their git email and must equal the caller's token identity |
 | `process:<id>` | `process:nightly-import` | automated jobs |
 
-The actor becomes the git commit author; the token's subject and client ID are recorded in an `Okf-Principal`
+The actor becomes the git commit author name. Commits by `human:<email>` actors use that email as the author email;
+all other actors use `ok-fine@localhost`. The token's subject and client ID are recorded in an `Okf-Principal`
 commit trailer.
 
 # Trust tiers
