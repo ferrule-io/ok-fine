@@ -127,6 +127,11 @@ Also external [External](https://example.com) and hash [Anchor](#heading).
     expect(links).toEqual(["tables/customers", "computations/revenue"]);
   });
 
+  it("extractLinks never treats footnote citations as concept links", () => {
+    expect(extractLinks("x[^a]\n\n[^a]: other.md\n", "dir/c")).toEqual([]);
+    expect(extractLinks("x[^a] and [B](b.md)\n\n[^a]: other.md\n", "dir/c")).toEqual(["dir/b"]);
+  });
+
   it("renderIndex golden string for a root with two types, a file, and a subdirectory", () => {
     const listing: DirListing = {
       isRoot: true,
