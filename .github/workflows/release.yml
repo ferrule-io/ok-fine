@@ -18,12 +18,12 @@ jobs:
     permissions:
       contents: read
 
-  release-commit:
-    name: Release commit and tag
+  plan:
+    name: Plan release
     needs: ci
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
     outputs:
       version: ${{ steps.release.outputs.version }}
       sha: ${{ steps.release.outputs.sha }}
@@ -36,7 +36,7 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Release commit and tag
+      - name: Create release commit and tag locally
         id: release
         env:
           SOURCE_SHA: ${{ github.sha }}
@@ -106,7 +106,10 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "chore(release): v${version}"
             git tag -a "v${version}" -m "Release v${version}"
-            git push --atomic origin HEAD:main "v${version}"
+
+            # Images build from this exact commit; release-commit pushes it only after they succeed.
+            mkdir -p "$RUNNER_TEMP/release"
+            git bundle create "$RUNNER_TEMP/release/release.bundle" "refs/tags/v${version}" "^${S}"
 
             sha="$(git rev-parse HEAD)"
             created="true"
@@ -133,9 +136,18 @@ jobs:
             echo "- Latest: \`${is_latest}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Upload release bundle
+        if: steps.release.outputs.created == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-bundle
+          path: ${{ runner.temp }}/release/release.bundle
+          retention-days: 1
+          if-no-files-found: error
+
   image:
     name: Build image (${{ matrix.arch }})
-    needs: release-commit
+    needs: plan
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
@@ -152,7 +164,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-commit.outputs.sha }}
+          ref: ${{ needs.plan.outputs.created == 'true' && github.sha || needs.plan.outputs.sha }}
+
+      - name: Download release bundle
+        if: needs.plan.outputs.created == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: release-bundle
+          path: ${{ runner.temp }}/release
+
+      - name: Check out unpushed release commit
+        if: needs.plan.outputs.created == 'true'
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_SHA: ${{ needs.plan.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch "$RUNNER_TEMP/release/release.bundle" "refs/tags/v${VERSION}:refs/tags/v${VERSION}"
+          git checkout --detach "$RELEASE_SHA"
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -167,8 +197,8 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           labels: |
-            org.opencontainers.image.version=${{ needs.release-commit.outputs.version }}
-            org.opencontainers.image.revision=${{ needs.release-commit.outputs.sha }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.plan.outputs.sha }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -202,9 +232,41 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  release-commit:
+    name: Release commit and tag
+    needs: [plan, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        if: needs.plan.outputs.created == 'true'
+        uses: actions/checkout@v7
+
+      - name: Download release bundle
+        if: needs.plan.outputs.created == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: release-bundle
+          path: ${{ runner.temp }}/release
+
+      - name: Push release commit and tag
+        if: needs.plan.outputs.created == 'true'
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_SHA: ${{ needs.plan.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch "$RUNNER_TEMP/release/release.bundle" "refs/tags/v${VERSION}:refs/tags/v${VERSION}"
+          if ! git push --atomic origin "${RELEASE_SHA}:refs/heads/main" "refs/tags/v${VERSION}"; then
+            echo "::error::Could not push v${VERSION}; if main moved past ${GITHUB_SHA}, the newer push releases it"
+            exit 1
+          fi
+
   manifest:
     name: Create multi-arch manifest
-    needs: [release-commit, image]
+    needs: [plan, release-commit]
     runs-on: ubuntu-24.04
     permissions:
       packages: write
@@ -230,9 +292,9 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         env:
           IMG: ghcr.io/${{ github.repository }}
-          VERSION: ${{ needs.release-commit.outputs.version }}
-          RELEASE_SHA: ${{ needs.release-commit.outputs.sha }}
-          IS_LATEST: ${{ needs.release-commit.outputs.is_latest }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_SHA: ${{ needs.plan.outputs.sha }}
+          IS_LATEST: ${{ needs.plan.outputs.is_latest }}
         run: |
           set -euo pipefail
           short_sha="${RELEASE_SHA:0:7}"
@@ -254,7 +316,7 @@ jobs:
 
   chart:
     name: Publish Helm chart
-    needs: [release-commit, manifest]
+    needs: [plan, manifest]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -263,14 +325,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-commit.outputs.sha }}
+          ref: ${{ needs.plan.outputs.sha }}
 
       - name: Set up Helm
         uses: azure/setup-helm@v5
 
       - name: Publish Helm chart
         env:
-          VERSION: ${{ needs.release-commit.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REGISTRY_OWNER: ${{ github.repository_owner }}
           REGISTRY_USER: ${{ github.actor }}
@@ -283,7 +345,7 @@ jobs:
 
   agents:
     name: Publish agent package
-    needs: release-commit
+    needs: [plan, release-commit]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -291,7 +353,7 @@ jobs:
       - name: Checkout release
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-commit.outputs.sha }}
+          ref: ${{ needs.plan.outputs.sha }}
           path: source
 
       - name: Checkout ok-fine-agents mirror
@@ -306,9 +368,9 @@ jobs:
       - name: Mirror agents/ and tag
         working-directory: mirror
         env:
-          VERSION: ${{ needs.release-commit.outputs.version }}
-          RELEASE_SHA: ${{ needs.release-commit.outputs.sha }}
-          IS_LATEST: ${{ needs.release-commit.outputs.is_latest }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_SHA: ${{ needs.plan.outputs.sha }}
+          IS_LATEST: ${{ needs.plan.outputs.is_latest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -332,7 +394,7 @@ jobs:
 
   npm:
     name: Publish npm package
-    needs: release-commit
+    needs: [plan, release-commit]
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -341,7 +403,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-commit.outputs.sha }}
+          ref: ${{ needs.plan.outputs.sha }}
 
       - name: Set up mise
         uses: jdx/mise-action@v5
@@ -356,8 +418,8 @@ jobs:
 
       - name: Publish to npm
         env:
-          VERSION: ${{ needs.release-commit.outputs.version }}
-          IS_LATEST: ${{ needs.release-commit.outputs.is_latest }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          IS_LATEST: ${{ needs.plan.outputs.is_latest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -371,8 +433,8 @@ jobs:
 
   wiki:
     name: Publish wiki
-    needs: release-commit
-    if: needs.release-commit.outputs.is_latest == 'true'
+    needs: [plan, release-commit]
+    if: needs.plan.outputs.is_latest == 'true'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -380,15 +442,15 @@ jobs:
       - name: Checkout release
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-commit.outputs.sha }}
+          ref: ${{ needs.plan.outputs.sha }}
           path: source
 
       - name: Mirror wiki/ to the repository wiki
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
-          VERSION: ${{ needs.release-commit.outputs.version }}
-          RELEASE_SHA: ${{ needs.release-commit.outputs.sha }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          RELEASE_SHA: ${{ needs.plan.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -411,7 +473,7 @@ jobs:
 
   merge-back:
     name: Merge release to development
-    needs: [release-commit, manifest, chart]
+    needs: [plan, manifest, chart]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -424,8 +486,8 @@ jobs:
       - name: Merge release into development
         id: merge-back
         env:
-          RELEASE_SHA: ${{ needs.release-commit.outputs.sha }}
-          VERSION: ${{ needs.release-commit.outputs.version }}
+          RELEASE_SHA: ${{ needs.plan.outputs.sha }}
+          VERSION: ${{ needs.plan.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
