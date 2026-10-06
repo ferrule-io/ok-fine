@@ -16,6 +16,8 @@ export type AuthConfig =
       jwksUri?: string;
       identityClaims: string[];
       allowInsecureIssuer: boolean;
+      /** Public OAuth client the web UI signs in with; unset = dynamic client registration. */
+      uiClientId?: string;
     };
 
 /** Settings the storage and service layers read; enough for the stdio transport. */
@@ -121,6 +123,7 @@ const httpEnvShape = {
   OAUTH_SCOPE_ADMIN: z.string().default("okf:admin"),
   OAUTH_IDENTITY_CLAIMS: z.string().default("email,preferred_username,sub"),
   OAUTH_ALLOW_INSECURE_ISSUER: z.string().optional(),
+  OAUTH_UI_CLIENT_ID: z.string().optional(),
 };
 
 function refineGitCredentials(
@@ -246,6 +249,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       .filter((s) => s.length > 0);
 
     const allowInsecureIssuer = raw.OAUTH_ALLOW_INSECURE_ISSUER === "true";
+    const uiClientId = raw.OAUTH_UI_CLIENT_ID?.trim();
 
     auth = {
       mode: "oidc",
@@ -254,6 +258,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       ...(raw.OAUTH_JWKS_URI === undefined ? {} : { jwksUri: raw.OAUTH_JWKS_URI }),
       identityClaims,
       allowInsecureIssuer,
+      ...(uiClientId ? { uiClientId } : {}),
     };
   }
 

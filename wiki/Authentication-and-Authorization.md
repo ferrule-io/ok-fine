@@ -46,7 +46,26 @@ To configure your provider:
   (default `email`, then `preferred_username`, then `sub`). Email identities compare case-insensitively. Agents
   derive `<id>` from the developer's `git config user.email`, so the token's `email` claim must carry that address.
 
-For exercising OIDC locally or running tests without an external provider, `src/dev/issuer.ts` (`node dist/dev/issuer-cli.js`) provides an unauthenticated token minter. **Never expose it in production.**
+# Web UI
+
+ok-fine serves a read-only web UI at `<PUBLIC_BASE_URL>/ui/` (`/` redirects there). It reads only through the
+[REST API](https://github.com/ferrule-io/ok-fine/wiki/REST-API) and signs in the same way MCP clients do: it reads
+`/.well-known/oauth-protected-resource/mcp`, then the authorization-server metadata, then runs authorization code +
+PKCE with `resource=<PUBLIC_BASE_URL>/mcp` and requests the read scope. The access token lives in the tab's session
+storage; there are no refresh tokens, and signing out is local only.
+
+The UI needs a public client at your provider:
+
+- Set `OAUTH_UI_CLIENT_ID` (Helm `oauth.uiClientId`) to a public client (no secret) that allows the authorization
+  code grant with PKCE, redirect URI `<PUBLIC_BASE_URL>/ui/callback`, and web origin `<PUBLIC_BASE_URL>` (CORS on the
+  token endpoint). Its access tokens must carry the audience and scopes above. Providers that need a non-standard
+  `audience` parameter must enable RFC 8707 `resource` support.
+- Or leave it unset: the UI then registers itself through dynamic client registration when the provider advertises
+  `registration_endpoint`. With neither, the UI shows a "Sign-in isn't configured" page listing these values.
+
+In `AUTH_MODE=none` the UI opens without signing in.
+
+For exercising OIDC locally or running tests without an external provider, `src/dev/issuer.ts` (`node dist/dev/issuer-cli.js`) provides an unauthenticated token minter. Its `/authorize` endpoint auto-approves browser sign-ins (`login_hint` sets the username) and `/register` accepts any client, so the web UI works against it with or without `OAUTH_UI_CLIENT_ID`. **Never expose it in production.**
 
 # Local stdio
 

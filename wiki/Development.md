@@ -5,8 +5,10 @@ pnpm typecheck
 pnpm lint             # biome check: lint, formatting, import order; warnings fail
 pnpm format           # biome check --write: apply formatting and import order
 pnpm test             # unit, service (real git in temp dirs), and end-to-end suites
-pnpm build
+pnpm build            # server to dist/, web UI to dist/ui
 ```
+
+Work on the web UI with hot reload: run a server on `127.0.0.1:8080` (for example `pnpm build && node dist/cli.js serve --no-auth`), then `pnpm dev:web` and open `http://localhost:5173/ui/`; Vite proxies `/api`, `/.well-known`, and `/ui/config.json` to the server. Without `dist/ui` the server starts with a warning and no `/ui`.
 
 Run the npm CLI from a checkout:
 
@@ -27,7 +29,9 @@ Layout:
 | `src/main.ts` | Container entry point |
 | `src/cli.ts`, `src/cli-options.ts` | npm CLI (`ok-fine`): stdio and `serve` |
 | `src/data-dir-lock.ts` | One CLI process per data directory |
+| `src/http/ui.ts` | Serves the built web UI (`dist/ui`) from memory at `/ui/` with its CSP and client config |
 | `src/dev/` | Development token issuer |
+| `web/` | Read-only web UI (React, Vite, Tailwind); built into `dist/ui`, talks only to `/api/v1` |
 | `charts/ok-fine/` | Helm chart |
 | `agents/` | Agent package (skills, SessionStart hook, pi/omp extension, harness manifests); mirrored to `ferrule-io/ok-fine-agents` |
 | `wiki/` | GitHub wiki source; mirrored to the repository wiki on release |

@@ -17,11 +17,13 @@ import type { Config, Logger, StorageConfig } from "./config.js";
 import { OkfError } from "./errors.js";
 import { registerMcpRoute } from "./http/mcp-route.js";
 import { registerRestRoutes } from "./http/rest.js";
+import { DEFAULT_UI_DIR, endpointOrigins, registerUiRoutes } from "./http/ui.js";
 import { createMcpServer } from "./mcp/server.js";
 import { KnowledgeService } from "./service/knowledge-service.js";
 import type { Principal } from "./service/principal.js";
 import { Catalog } from "./store/catalog.js";
 import { GitBackend } from "./store/git-backend.js";
+import { VERSION } from "./version.js";
 
 type Permission = "read" | "write" | "admin";
 
@@ -55,7 +57,12 @@ export interface RunningServer {
 const DISCOVERY_ATTEMPTS = 5;
 const DISCOVERY_RETRY_MS = 2000;
 
-export async function startServer(config: Config): Promise<RunningServer> {
+export interface StartServerOptions {
+  /** Built web UI directory; default DEFAULT_UI_DIR. */
+  uiDir?: string;
+}
+
+export async function startServer(config: Config, options: StartServerOptions = {}): Promise<RunningServer> {
   const app = Fastify({
     logger: { level: config.logLevel, redact: ["req.headers.authorization"] },
     trustProxy: true,
@@ -75,6 +82,7 @@ export async function startServer(config: Config): Promise<RunningServer> {
 
   let authHandler: AuthHandler;
 
+  let uiConnectSrc: string[] = [];
   if (config.auth.mode === "oidc") {
     let discovered: DiscoveredAuthorizationServer | undefined;
     for (let attempt = 1; !discovered; attempt++) {
@@ -90,6 +98,8 @@ export async function startServer(config: Config): Promise<RunningServer> {
       }
     }
     const { metadata, jwksUri } = discovered;
+    // The web UI fetches these cross-origin; it reaches authorization_endpoint by navigation, which CSP does not cover.
+    uiConnectSrc = endpointOrigins(metadata.token_endpoint, metadata.registration_endpoint);
 
     const resourceServerUrl = new URL(`${config.publicBaseUrl}/mcp`);
     const prm = buildOAuthProtectedResourceMetadata({
@@ -194,6 +204,17 @@ export async function startServer(config: Config): Promise<RunningServer> {
   });
 
   app.get("/healthz", async () => ({ status: "ok" }));
+  await registerUiRoutes(app, {
+    dir: options.uiDir ?? DEFAULT_UI_DIR,
+    publicBaseUrl: config.publicBaseUrl,
+    clientConfig: {
+      authMode: config.auth.mode,
+      oauthClientId: config.auth.mode === "oidc" ? (config.auth.uiClientId ?? null) : null,
+      scope: config.scopeNames.read,
+      version: VERSION,
+    },
+    connectSrc: uiConnectSrc,
+  });
 
   app.decorateRequest("principal", null);
   app.decorateRequest("authInfo", null);

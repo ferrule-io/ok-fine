@@ -12,6 +12,7 @@ message naming every bad variable.
 | `OAUTH_SCOPE_READ` / `_WRITE` / `_ADMIN` | `okf:read` / `okf:write` / `okf:admin` | Scope names (granted to anonymous principal in `none` mode) |
 | `OAUTH_IDENTITY_CLAIMS` | `email,preferred_username,sub` | Claims tried in order for `human:<id>` binding (`oidc` mode only) |
 | `OAUTH_ALLOW_INSECURE_ISSUER` | `false` | Allow an `http://` issuer (development only, `oidc` mode only) |
+| `OAUTH_UI_CLIENT_ID` | unset | Public OAuth client the web UI signs in with (authorization code + PKCE, redirect `<PUBLIC_BASE_URL>/ui/callback`); unset = dynamic client registration when the provider supports it (`oidc` mode only) |
 | `PORT` | `8080` | |
 | `HOST` | `0.0.0.0` (container), `127.0.0.1` (`ok-fine serve`) | |
 | `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |

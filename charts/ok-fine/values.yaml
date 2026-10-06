@@ -28,6 +28,7 @@ oauth:               # used only when auth.mode=oidc
     admin: okf:admin
   identityClaims: [email, preferred_username, sub]
   allowInsecureIssuer: false   # development only (http:// issuer)
+  uiClientId: ""   # public client for the web UI (auth code + PKCE, redirect <publicBaseUrl>/ui/callback); empty = dynamic client registration
 git:
   branch: main
   remote:
