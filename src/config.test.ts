@@ -58,6 +58,10 @@ describe("loadConfig", () => {
     ["OAUTH_ALLOW_INSECURE_ISSUER", "yes"],
     ["LOG_LEVEL", "verbose"],
     ["DATA_DIR", "relative/path"],
+    ["DEFAULT_STALE_AFTER_DAYS", "0"],
+    ["DEFAULT_STALE_AFTER_DAYS", "36501"],
+    ["DEFAULT_STALE_AFTER_DAYS", "abc"],
+    ["DEFAULT_STALE_AFTER_DAYS", "1.5"],
   ])("rejects %s=%s naming the variable", (name, value) => {
     expect(() => loadConfig({ ...required, [name]: value })).toThrow(name);
   });
@@ -69,5 +73,13 @@ describe("loadConfig", () => {
   it("requires HTTP credentials together", () => {
     expect(() => loadConfig({ ...required, GIT_HTTP_USERNAME: "u" })).toThrow("GIT_HTTP_USERNAME");
     expect(loadConfig({ ...required, GIT_HTTP_USERNAME: "u", GIT_HTTP_PASSWORD: "p" }).gitHttpPassword).toBe("p");
+  });
+
+  it("loads optional DEFAULT_STALE_AFTER_DAYS when unset, empty, or valid", () => {
+    expect(loadConfig(required).defaultStaleAfterDays).toBeUndefined();
+    expect(loadConfig({ ...required, DEFAULT_STALE_AFTER_DAYS: "" }).defaultStaleAfterDays).toBeUndefined();
+    expect(loadConfig({ ...required, DEFAULT_STALE_AFTER_DAYS: "180" }).defaultStaleAfterDays).toBe(180);
+    expect(loadConfig({ ...required, DEFAULT_STALE_AFTER_DAYS: "1" }).defaultStaleAfterDays).toBe(1);
+    expect(loadConfig({ ...required, DEFAULT_STALE_AFTER_DAYS: "36500" }).defaultStaleAfterDays).toBe(36500);
   });
 });

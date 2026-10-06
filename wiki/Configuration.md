@@ -23,3 +23,4 @@ variable.
 | `GIT_HTTP_USERNAME` / `GIT_HTTP_PASSWORD` | unset | Set both or neither |
 | `MAX_FILE_BYTES` | `1048576` | Max size of one concept or file |
 | `MAX_ARCHIVE_BYTES` | `52428800` | Max compressed archive upload |
+| `DEFAULT_STALE_AFTER_DAYS` | unset | Opt-in; stamps `stale_after` = now + N days on `write_concept` when omitted; producer value wins |

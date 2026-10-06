@@ -9,6 +9,7 @@ import { type ConceptRecord, parseConcept } from "../okf/concept.js";
 import {
   appendVerification,
   applyFrontmatter,
+  isoAfterDays,
   nowIso,
   parseFrontmatter,
   serializeConcept,
@@ -681,7 +682,18 @@ export class KnowledgeService {
       const isCreated = existingRev === null;
       const prevStatus = existingRecord?.status;
 
-      const { doc, ignoredKeys } = applyFrontmatter(existingDoc, args.frontmatter, {
+      let frontmatter = args.frontmatter;
+      if (
+        this.config.defaultStaleAfterDays !== undefined &&
+        (!("stale_after" in args.frontmatter) || args.frontmatter.stale_after == null)
+      ) {
+        frontmatter = {
+          ...args.frontmatter,
+          stale_after: isoAfterDays(new Date(), this.config.defaultStaleAfterDays),
+        };
+      }
+
+      const { doc, ignoredKeys } = applyFrontmatter(existingDoc, frontmatter, {
         generated: { by: args.actor, at: nowIso() },
       });
 

@@ -197,3 +197,8 @@ export function appendVerification(doc: Document, entry: { by: string; at: strin
 export function nowIso(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
 }
+
+export function isoAfterDays(now: Date, days: number): string {
+  const d = new Date(now.getTime() + days * 86_400_000);
+  return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
