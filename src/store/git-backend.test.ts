@@ -1,9 +1,9 @@
-import { execSync } from "node:child_process";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { execFileSync, execSync } from "node:child_process";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type Logger, loadConfig } from "../config.js";
+import { type Logger, loadConfig, loadStorageConfig } from "../config.js";
 import { pathExists } from "./fs-util.js";
 import { GitBackend } from "./git-backend.js";
 
@@ -77,5 +77,40 @@ describe("GitBackend", () => {
     expect((await storage.tree("p")).hasFile("link.md")).toBe(false);
     expect(await storage.readFile("p", "link.md")).toBeNull();
     expect((await storage.readFile("p", "a.md"))?.toString("utf8")).toBe("# A\n");
+  });
+
+  it("uses the host git config and credentials mapping when gitHostEnv is set", async () => {
+    const bare = join(dataDir, "remote.git");
+    execFileSync("git", ["init", "--bare", "-b", "main", bare]);
+    const home = join(dataDir, "host-home");
+    const hooks = join(home, "hooks");
+    await mkdir(hooks, { recursive: true });
+    await writeFile(join(hooks, "pre-commit"), "#!/bin/sh\nexit 1\n");
+    await chmod(join(hooks, "pre-commit"), 0o755);
+    await writeFile(
+      join(home, ".gitconfig"),
+      `[url "${bare}"]\n\tinsteadOf = https://okf.invalid/kb.git\n[core]\n\thooksPath = ${hooks}\n`,
+    );
+
+    const config = loadStorageConfig(
+      {
+        DATA_DIR: join(dataDir, "data"),
+        GIT_REMOTE_URL: "https://okf.invalid/kb.git",
+        LOG_LEVEL: "silent",
+        HOME: home,
+        PATH: process.env.PATH,
+      },
+      { inheritGitEnv: true },
+    );
+    const storage = await GitBackend.open(config, log);
+    await storage.transaction({ projects: ["p"] }, async (tx) => {
+      await tx.writeFile("p", "a.md", "# A\n");
+      return { value: null, commit };
+    });
+    await storage.close();
+
+    const subjects = execFileSync("git", ["--git-dir", bare, "log", "--format=%s", "main"]).toString("utf8");
+    expect(subjects).toContain("test");
+    expect(subjects).toContain("okf: initialize knowledge repository");
   });
 });

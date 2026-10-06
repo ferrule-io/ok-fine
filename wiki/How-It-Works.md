@@ -10,7 +10,8 @@ DATA_DIR/
 │   │       ├── index.md
 │   │       └── orders.md
 │   └── …
-├── home/                 HOME for git/ssh child processes
+├── home/                 HOME for git/ssh child processes (container)
+├── ok-fine.lock          held by the local CLI process (npm package only)
 └── tmp/                  archive import staging
 ```
 

@@ -16,8 +16,8 @@ The agent package is built from [`agents/`](https://github.com/ferrule-io/ok-fin
 
 | Stage | Who / when | Mechanism |
 |---|---|---|
-| 1. Org setup | Once per org | Deploy ok-fine and configure the identity provider (below). |
-| 2. Developer setup | Once per developer per harness | Install the package, add a user-scope MCP server named `ok-fine`, and log in with the harness's OAuth flow. |
+| 1. Org setup | Once per org | Deploy ok-fine and configure the identity provider (below). Single developer: skip and run ok-fine locally over stdio (below). |
+| 2. Developer setup | Once per developer per harness | Install the package, add a user-scope MCP server named `ok-fine`, and log in with the harness's OAuth flow (HTTP only). |
 | 3. Repository onboarding | Once per codebase, by anyone with `okf:write` | Ask the agent to "onboard this repository to ok-fine". The `ok-fine-onboard` skill creates or picks the project, adds the git remote to the overview's `repositories`, and bootstraps up to 30 concepts, each with `sources[].commit` and a `stale_after` 180 days out. The codebase is untouched. |
 | 4. Every session | Automatic | The hook/extension tells the agent the repository URL; server instructions and the `ok-fine` skill drive `list_projects(repository=…)`, recall (overview, index, search) before work, and capture of durable knowledge after. On recall the agent checks each concept's code sources for drift since `sources[].commit`; a stale or drifted concept is re-checked against the code and, without asking the user, corrected if needed, refreshed (`commit` → HEAD, `stale_after` + 180 days), and agent-verified. |
 | 5. Maintenance | On demand | Ask the agent to "review ok-fine knowledge". The `ok-fine-review` skill runs lint, finds stale, unverified, drifted, and `stale_after`-less concepts, and refreshes and agent-verifies them without a human gate. Deprecations and deletions wait for confirmation; human verification is an optional correction step recorded only on explicit confirmation. |
@@ -46,7 +46,27 @@ several repositories) for monorepo splits and multi-repo products.
 - Dynamic client registration or client ID metadata documents, or one public client with loopback redirect URIs
   that developers pass as the client ID below.
 
-# Per-harness setup
+# Local setup (stdio)
+
+Without a shared server, each harness starts ok-fine itself from npm
+([Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally)); knowledge lives in `~/.ok-fine`.
+Requires Node.js 24+ and git.
+
+| Harness | Add server |
+|---|---|
+| Claude Code | `claude mcp add --scope user ok-fine -- npx -y @ferrule-io/ok-fine` |
+| Codex CLI | `codex mcp add ok-fine -- npx -y @ferrule-io/ok-fine` |
+| Gemini CLI | `~/.gemini/settings.json`: `{"mcpServers":{"ok-fine":{"command":"npx","args":["-y","@ferrule-io/ok-fine"]}}}` |
+| pi | `~/.pi/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"command":"npx","args":["-y","@ferrule-io/ok-fine"],"exposure":"direct"}}}` |
+| omp | `~/.omp/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"type":"stdio","command":"npx","args":["-y","@ferrule-io/ok-fine"]}}}` |
+
+- Install the agent package as in the table below; there is no login step.
+- Flags go after the package name, e.g. `npx -y @ferrule-io/ok-fine --remote git@github.com:acme/knowledge.git`.
+  Gemini CLI uses `settings.json` because `gemini mcp add` would parse `-y` itself.
+- One process serves a data directory, so concurrent sessions need `npx -y @ferrule-io/ok-fine serve --no-auth`
+  running once and the HTTP rows below with `http://localhost:8080/mcp` and no login.
+
+# Per-harness setup (shared server)
 
 Replace `https://okf.example.com` with your `PUBLIC_BASE_URL`.
 

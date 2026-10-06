@@ -23,6 +23,9 @@ importers:
       minisearch:
         specifier: ^7.2.0
         version: 7.2.0
+      pino:
+        specifier: ^10.4.0
+        version: 10.4.0
       tar:
         specifier: ^7.5.22
         version: 7.5.22

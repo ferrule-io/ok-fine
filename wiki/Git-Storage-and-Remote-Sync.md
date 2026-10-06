@@ -22,3 +22,9 @@ the changes on the next sync and regenerates indexes. `.gitattributes` uses a un
 
 Remote auth: SSH (`GIT_SSH_KEY_PATH`, optional `GIT_SSH_KNOWN_HOSTS_PATH`; without it the host key is trusted on
 first use) or HTTPS (`GIT_HTTP_USERNAME` / `GIT_HTTP_PASSWORD`, passed via environment, never written to git config).
+
+The npm CLI (`ok-fine`, `ok-fine serve`) instead runs git with your own environment: your ssh-agent and
+`~/.ssh/config`, and credential helpers such as osxkeychain or `gh auth setup-git`. git runs without a terminal, so
+accept host keys and unlock keys beforehand (e.g. `git ls-remote <url>`). Your hooks and global ignore and
+attributes files are not applied to the knowledge repository. See
+[Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally#syncing-with-a-git-remote).
