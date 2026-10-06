@@ -1,6 +1,6 @@
 {
   "name": "ok-fine",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "OKF v0.2 knowledge repository for AI agents (MCP + REST)",
   "license": "Apache-2.0",
