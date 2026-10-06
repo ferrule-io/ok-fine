@@ -16,6 +16,7 @@ import {
   type StoredToken,
 } from "./flow.js";
 import { tokenIdentity } from "./identity.js";
+import { sanitizeReturnTo } from "./returnTo.js";
 
 export type AuthState =
   | { status: "loading" }
@@ -122,6 +123,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } catch {
             // Bad token JSON in storage, ignore and sign out
           }
+          window.sessionStorage.removeItem("okf.oauth.token");
+          window.sessionStorage.removeItem("okf.oauth.pending");
         }
 
         setState({
@@ -148,10 +151,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthHooks({
       getToken: () => {
         const current = stateRef.current;
-        return current.status === "signed-in" ? current.token.accessToken : null;
+        if (current.status === "signed-in" && isTokenUsable(current.token)) {
+          return current.token.accessToken;
+        }
+        return null;
       },
       onUnauthorized: () => {
         window.sessionStorage.removeItem("okf.oauth.token");
+        window.sessionStorage.removeItem("okf.oauth.pending");
         queryClient.clear();
         const current = stateRef.current;
         if ("config" in current && "discovery" in current) {
@@ -185,6 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const msUntilExpiry = state.token.expiresAt - 30_000 - Date.now();
     if (msUntilExpiry <= 0) {
       window.sessionStorage.removeItem("okf.oauth.token");
+      window.sessionStorage.removeItem("okf.oauth.pending");
       queryClient.clear();
       setState({
         status: "signed-out",
@@ -197,6 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const timer = setTimeout(() => {
       window.sessionStorage.removeItem("okf.oauth.token");
+      window.sessionStorage.removeItem("okf.oauth.pending");
       queryClient.clear();
       setState({
         status: "signed-out",
@@ -225,7 +234,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const redirectUri = `${window.location.origin}/ui/callback`;
     const clientId = await resolveClientId(discovery, config, redirectUri, window.localStorage);
-    const { url, pending } = await buildAuthorizationUrl(discovery, clientId, redirectUri, config.scope, returnTo);
+    const safeReturnTo = sanitizeReturnTo(returnTo, window.location.origin);
+    const { url, pending } = await buildAuthorizationUrl(discovery, clientId, redirectUri, config.scope, safeReturnTo);
     window.sessionStorage.setItem("okf.oauth.pending", JSON.stringify(pending));
     window.location.assign(url.href);
   }, []);
@@ -295,7 +305,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           token,
           identity,
         });
-        return pending.returnTo;
+        return sanitizeReturnTo(pending.returnTo, window.location.origin);
       } catch (err) {
         if (err instanceof oauth.AuthorizationResponseError || err instanceof oauth.ResponseBodyError) {
           if (err.error === "invalid_client" || err.error === "unauthorized_client") {
@@ -321,6 +331,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     window.sessionStorage.removeItem("okf.oauth.token");
+    window.sessionStorage.removeItem("okf.oauth.pending");
     queryClient.clear();
     const current = stateRef.current;
     if ("config" in current && "discovery" in current) {

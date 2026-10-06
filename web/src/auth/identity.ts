@@ -1,3 +1,13 @@
+function hasControlChar(s: string): boolean {
+  for (let i = 0; i < s.length; i++) {
+    const code = s.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function tokenIdentity(accessToken: string): string | null {
   try {
     const parts = accessToken.split(".");
@@ -17,22 +27,27 @@ export function tokenIdentity(accessToken: string): string | null {
     if (typeof parsed !== "object" || parsed === null) {
       return null;
     }
+    const sanitizeClaim = (val: unknown): string | null => {
+      if (typeof val !== "string") return null;
+      const trimmed = val.trim();
+      return trimmed.length > 0 && !hasControlChar(trimmed) ? trimmed : null;
+    };
 
-    if ("email" in parsed && typeof parsed.email === "string" && parsed.email.trim().length > 0) {
-      return parsed.email.trim();
+    if ("email" in parsed) {
+      const email = sanitizeClaim(parsed.email);
+      if (email) return email;
     }
-    if (
-      "preferred_username" in parsed &&
-      typeof parsed.preferred_username === "string" &&
-      parsed.preferred_username.trim().length > 0
-    ) {
-      return parsed.preferred_username.trim();
+    if ("preferred_username" in parsed) {
+      const username = sanitizeClaim(parsed.preferred_username);
+      if (username) return username;
     }
-    if ("name" in parsed && typeof parsed.name === "string" && parsed.name.trim().length > 0) {
-      return parsed.name.trim();
+    if ("name" in parsed) {
+      const name = sanitizeClaim(parsed.name);
+      if (name) return name;
     }
-    if ("sub" in parsed && typeof parsed.sub === "string" && parsed.sub.trim().length > 0) {
-      return parsed.sub.trim();
+    if ("sub" in parsed) {
+      const sub = sanitizeClaim(parsed.sub);
+      if (sub) return sub;
     }
     return null;
   } catch {

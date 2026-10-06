@@ -90,6 +90,21 @@ In `AUTH_MODE=none` the UI opens without signing in.
 
 For exercising OIDC locally or running tests without an external provider, `src/dev/issuer.ts` (`node dist/dev/issuer-cli.js`) provides an unauthenticated token minter. Its `/authorize` endpoint auto-approves browser sign-ins (`login_hint` sets the username) and `/register` accepts any client, so the web UI works against it with or without `OAUTH_UI_CLIENT_ID`. **Never expose it in production.**
 
+## Web UI security headers
+
+Web UI routes (`/ui/`, `/`, `/ui/config.json`, assets, and error responses) send fixed, non-configurable security headers:
+
+- **CSP:** App shell uses `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' <IdP origins>; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` ('unsafe-inline' styles are for Shiki highlighting, `img-src` excludes remote images so they can't leak reader IPs, and `upgrade-insecure-requests` is added only when `PUBLIC_BASE_URL` is https).
+- **SVG responses:** Sandboxed CSP `default-src 'none'; style-src 'unsafe-inline'; sandbox`.
+- **Framing:** `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
+- **MIME:** `X-Content-Type-Options: nosniff`.
+- **Referrer:** `Referrer-Policy: no-referrer`.
+- **COOP:** `Cross-Origin-Opener-Policy: same-origin`.
+- **Permissions-Policy:** `camera=(), display-capture=(), geolocation=(), microphone=()`.
+- **Caching:** `index.html` is `no-cache`, `config.json` is `no-store`, and `assets/*` are immutable (`public, max-age=31536000, immutable`).
+
+In `AUTH_MODE=none` the Host/Origin check also covers `/ui` (foreign Host gets 403). Rendered Markdown blocks remote images (shown as a link instead) and only allows http(s)/mailto/tel external links.
+
 # Public deployment checklist
 
 Before exposing ok-fine on a network or the internet, verify the following:

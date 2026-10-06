@@ -430,6 +430,34 @@ describe("ok-fine with AUTH_MODE=none", () => {
     expect(json.error?.code).toBe("forbidden");
   });
 
+  it("rejects requests to /ui/ with forbidden Host header in AUTH_MODE=none", async () => {
+    const url = new URL(noneServer.url);
+    const res = await new Promise<{ statusCode: number; headers: http.IncomingHttpHeaders; body: string }>(
+      (resolve, reject) => {
+        const req = http.request(
+          {
+            host: url.hostname,
+            port: url.port,
+            path: "/ui/",
+            method: "GET",
+            headers: { Host: "evil.example" },
+          },
+          (r) => {
+            let body = "";
+            r.on("data", (chunk) => (body += chunk));
+            r.on("end", () => resolve({ statusCode: r.statusCode ?? 0, headers: r.headers, body }));
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      },
+    );
+    expect(res.statusCode).toBe(403);
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    const json = JSON.parse(res.body) as { error?: { code?: string } };
+    expect(json.error?.code).toBe("forbidden");
+  });
+
   it("rejects requests with forbidden Origin header in AUTH_MODE=none", async () => {
     const res = await fetch(`${noneServer.url}/api/v1/projects`, {
       headers: { origin: "http://evil.example" },
