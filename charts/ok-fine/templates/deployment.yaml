@@ -1,6 +1,11 @@
 {{- if not (has .Values.auth.mode (list "oidc" "none")) -}}
 {{- fail "auth.mode must be \"oidc\" or \"none\"" -}}
 {{- end -}}
+{{- if eq .Values.auth.mode "none" -}}
+{{- if or .Values.ingress.enabled .Values.httpRoute.enabled -}}
+{{- fail "unauthenticated admin access must not be routed publicly; use kubectl port-forward" -}}
+{{- end -}}
+{{- end -}}
 {{- $auth := .Values.git.remote.auth -}}
 {{- if not (has $auth (list "none" "ssh" "https")) -}}
 {{- fail "git.remote.auth must be none, ssh, or https" -}}
@@ -11,6 +16,14 @@
 {{- end -}}
 {{- if not .Values.git.remote.existingSecret -}}
 {{- fail "git.remote.existingSecret is required when git.remote.auth is ssh or https" -}}
+{{- end -}}
+{{- end -}}
+{{- if eq $auth "ssh" -}}
+{{- if not .Values.git.remote.sshPrivateKeyKey -}}
+{{- fail "git.remote.sshPrivateKeyKey is required when git.remote.auth is ssh" -}}
+{{- end -}}
+{{- if not .Values.git.remote.knownHostsKey -}}
+{{- fail "git.remote.knownHostsKey is required when git.remote.auth is ssh" -}}
 {{- end -}}
 {{- end -}}
 apiVersion: apps/v1
@@ -74,8 +87,16 @@ spec:
             - name: DEFAULT_STALE_AFTER_DAYS
               value: {{ . | int | quote }}
             {{- end }}
+            {{- if or .Values.config.trustProxy (eq (printf "%v" .Values.config.trustProxy) "false") }}
+            - name: TRUST_PROXY
+              value: {{ .Values.config.trustProxy | quote }}
+            {{- end }}
             - name: AUTH_MODE
               value: {{ .Values.auth.mode | quote }}
+            {{- if eq .Values.auth.mode "none" }}
+            - name: ALLOW_UNAUTHENTICATED_NETWORK
+              value: "true"
+            {{- end }}
             {{- if eq .Values.auth.mode "oidc" }}
             - name: OAUTH_ISSUER
               value: {{ required "oauth.issuer is required" .Values.oauth.issuer | quote }}
@@ -93,10 +114,32 @@ spec:
               value: {{ .Values.oauth.scopes.write | quote }}
             - name: OAUTH_SCOPE_ADMIN
               value: {{ .Values.oauth.scopes.admin | quote }}
+            {{- if .Values.oauth.identityClaims }}
             - name: OAUTH_IDENTITY_CLAIMS
               value: {{ join "," .Values.oauth.identityClaims | quote }}
+            {{- end }}
             - name: OAUTH_ALLOW_INSECURE_ISSUER
               value: {{ .Values.oauth.allowInsecureIssuer | quote }}
+            {{- if .Values.oauth.allowedSubjects }}
+            - name: OAUTH_ALLOWED_SUBJECTS
+              value: {{ join "," .Values.oauth.allowedSubjects | quote }}
+            {{- end }}
+            {{- if .Values.oauth.allowedEmails }}
+            - name: OAUTH_ALLOWED_EMAILS
+              value: {{ join "," .Values.oauth.allowedEmails | quote }}
+            {{- end }}
+            {{- if .Values.oauth.requiredGroups }}
+            - name: OAUTH_REQUIRED_GROUPS
+              value: {{ join "," .Values.oauth.requiredGroups | quote }}
+            {{- end }}
+            {{- if .Values.oauth.groupsClaim }}
+            - name: OAUTH_GROUPS_CLAIM
+              value: {{ if kindIs "slice" .Values.oauth.groupsClaim }}{{ join "," .Values.oauth.groupsClaim | quote }}{{ else }}{{ .Values.oauth.groupsClaim | quote }}{{ end }}
+            {{- end }}
+            {{- if .Values.oauth.allowedClientIds }}
+            - name: OAUTH_ALLOWED_CLIENT_IDS
+              value: {{ join "," .Values.oauth.allowedClientIds | quote }}
+            {{- end }}
             {{- end }}
             - name: GIT_BRANCH
               value: {{ .Values.git.branch | quote }}
@@ -109,10 +152,8 @@ spec:
             {{- if eq $auth "ssh" }}
             - name: GIT_SSH_KEY_PATH
               value: {{ printf "/etc/ok-fine/git/%s" .Values.git.remote.sshPrivateKeyKey | quote }}
-            {{- if .Values.git.remote.knownHostsKey }}
             - name: GIT_SSH_KNOWN_HOSTS_PATH
               value: {{ printf "/etc/ok-fine/git/%s" .Values.git.remote.knownHostsKey | quote }}
-            {{- end }}
             {{- end }}
             {{- if eq $auth "https" }}
             - name: GIT_HTTP_USERNAME

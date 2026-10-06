@@ -4,7 +4,8 @@ ok-fine has been deployed.
 *********************************************************************************
 *** WARNING: Authentication is disabled (auth.mode=none).                     ***
 *** Anyone reaching the service has administrative access.                    ***
-*** Local testing only — never expose this service beyond localhost!          ***
+*** Ingress and HTTPRoute must remain disabled; unauthenticated admin access  ***
+*** must not be routed publicly. Connect only via kubectl port-forward!       ***
 *********************************************************************************
 {{- end }}
 

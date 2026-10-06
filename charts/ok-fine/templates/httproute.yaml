@@ -1,4 +1,7 @@
 {{- if .Values.httpRoute.enabled -}}
+{{- if eq .Values.auth.mode "none" -}}
+{{- fail "unauthenticated admin access must not be routed publicly; use kubectl port-forward" -}}
+{{- end -}}
 {{- if not .Values.httpRoute.parentRefs -}}
 {{- fail "httpRoute.parentRefs is required when httpRoute.enabled is true" -}}
 {{- end -}}
