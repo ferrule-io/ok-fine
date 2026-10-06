@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -425,5 +425,29 @@ describe("stdio proxy and shared sessions", () => {
     in2.end();
     await proxy2.done;
     await proxy2.close();
+  });
+
+  it("gives up after electionTimeoutMs when a live process holds the lock but never serves the socket", async () => {
+    // The parent process is alive and is not an ok-fine host, so no socket ever appears.
+    await writeFile(join(dataDir, "ok-fine.lock"), `${process.ppid}\n`);
+    let hostStarts = 0;
+    const started = Date.now();
+    await expect(
+      startStdioProxy({
+        config: loadStorageConfig({ DATA_DIR: dataDir, LOG_LEVEL: "silent" }),
+        identity: null,
+        log: silent,
+        stdin: new PassThrough(),
+        stdout: new PassThrough(),
+        electionTimeoutMs: 300,
+        startHost: async () => {
+          hostStarts++;
+          throw new Error("must not host while the lock is held");
+        },
+      }),
+    ).rejects.toThrow(Error);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(300);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(hostStarts).toBe(0);
   });
 });
