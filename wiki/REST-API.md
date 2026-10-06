@@ -20,7 +20,7 @@ updates or `If-None-Match: *` for create-only PUTs of concepts and files (other 
 | GET | `/projects/:project/lint` | read | |
 | GET | `/projects/:project/archive` | read | `.tar.gz` export of the committed bundle |
 | PUT | `/projects/:project/archive` | admin | import a `.tar.gz` (single top-level directory); replaces the project |
-| GET | `/search` | read | `q`, `project`, `type`, `tag` (repeatable), `status`, `trustTier`, `stale`, `limit` |
+| GET | `/search` | read | `q` (max 512 chars), `project`, `type`, `tag` (repeatable), `status`, `trustTier`, `stale`, `limit` |
 | GET | `/sync` | read | remote sync status |
 | POST | `/sync` | admin | sync now |
 

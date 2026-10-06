@@ -11,6 +11,9 @@ services:
       - "127.0.0.1:8080:8080"
     environment:
       AUTH_MODE: "none"
+      # The container listens on 0.0.0.0 so ALLOW_UNAUTHENTICATED_NETWORK is required.
+      # The host port mapping above must stay 127.0.0.1-only to avoid public unauthenticated access.
+      ALLOW_UNAUTHENTICATED_NETWORK: "true"
       PUBLIC_BASE_URL: "http://localhost:8080"
     volumes:
       - okf-data:/data

@@ -1,3 +1,4 @@
+import { isIPv4 } from "node:net";
 import { z } from "zod";
 
 export interface Logger {
@@ -5,6 +6,14 @@ export interface Logger {
   warn(objOrMsg: unknown, msg?: string): void;
   error(objOrMsg: unknown, msg?: string): void;
   debug(objOrMsg: unknown, msg?: string): void;
+}
+
+export interface AccessPolicy {
+  allowedSubjects: string[];
+  allowedEmails: string[];
+  requiredGroups: string[];
+  groupsClaim: string;
+  allowedClientIds: string[];
 }
 
 export type AuthConfig =
@@ -16,6 +25,7 @@ export type AuthConfig =
       jwksUri?: string;
       identityClaims: string[];
       allowInsecureIssuer: boolean;
+      access: AccessPolicy;
       /** Public OAuth client the web UI signs in with; unset = dynamic client registration. */
       uiClientId?: string;
     };
@@ -48,6 +58,8 @@ export interface Config extends StorageConfig {
     write: string;
     admin: string;
   };
+  allowUnauthenticatedNetwork: boolean;
+  trustProxy: boolean | number | string;
 }
 
 export interface LoadOptions {
@@ -89,6 +101,40 @@ function httpUrl(value: string): boolean {
     return false;
   }
 }
+function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  if (normalized === "localhost" || normalized === "::1" || normalized === "[::1]") {
+    return true;
+  }
+  if (isIPv4(normalized)) {
+    const octets = normalized.split(".");
+    if (octets[0] === "127") {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseTrustProxy(val: string | undefined): boolean | number | string {
+  if (val === undefined || val === "") {
+    return "loopback,linklocal,uniquelocal";
+  }
+  const trimmed = val.trim();
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (/^\d+$/.test(trimmed)) {
+    return Number.parseInt(trimmed, 10);
+  }
+  return trimmed;
+}
+
+function parseList(val: string | undefined): string[] {
+  if (!val) return [];
+  return val
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 const storageEnvShape = {
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
@@ -123,11 +169,39 @@ const httpEnvShape = {
   OAUTH_SCOPE_ADMIN: z.string().default("okf:admin"),
   OAUTH_IDENTITY_CLAIMS: z.string().default("email,preferred_username,sub"),
   OAUTH_ALLOW_INSECURE_ISSUER: z.string().optional(),
+  OAUTH_ALLOWED_SUBJECTS: z.string().optional(),
+  OAUTH_ALLOWED_EMAILS: z.string().optional(),
+  OAUTH_REQUIRED_GROUPS: z.string().optional(),
+  OAUTH_GROUPS_CLAIM: z.string().default("groups"),
+  OAUTH_ALLOWED_CLIENT_IDS: z.string().optional(),
+  ALLOW_UNAUTHENTICATED_NETWORK: z.string().optional(),
+  TRUST_PROXY: z.string().optional(),
   OAUTH_UI_CLIENT_ID: z.string().optional(),
 };
 
+function isValidGitRemoteUrl(url: string): boolean {
+  if (url.startsWith("/") || url.startsWith("https://") || url.startsWith("ssh://") || url.startsWith("file://")) {
+    return true;
+  }
+  if (!url.includes("://")) {
+    const at = url.indexOf("@");
+    const colon = url.indexOf(":");
+    if (at !== -1 && colon !== -1 && at < colon) {
+      const slash = url.indexOf("/");
+      return slash === -1 || slash > colon;
+    }
+  }
+  return false;
+}
+
 function refineGitCredentials(
-  data: { GIT_HTTP_USERNAME?: string | undefined; GIT_HTTP_PASSWORD?: string | undefined },
+  data: {
+    GIT_HTTP_USERNAME?: string | undefined;
+    GIT_HTTP_PASSWORD?: string | undefined;
+    GIT_REMOTE_URL?: string | undefined;
+    GIT_SSH_KEY_PATH?: string | undefined;
+    GIT_SSH_KNOWN_HOSTS_PATH?: string | undefined;
+  },
   ctx: z.RefinementCtx,
 ): void {
   if (!data || typeof data !== "object") return;
@@ -138,12 +212,49 @@ function refineGitCredentials(
       message: "GIT_HTTP_USERNAME and GIT_HTTP_PASSWORD must be provided together or neither",
     });
   }
+  if (data.GIT_REMOTE_URL !== undefined && !isValidGitRemoteUrl(data.GIT_REMOTE_URL)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["GIT_REMOTE_URL"],
+      message: "GIT_REMOTE_URL must be https://, ssh://, user@host:path, file:// or an absolute path",
+    });
+  }
+  if (data.GIT_SSH_KEY_PATH?.trim() && !data.GIT_SSH_KNOWN_HOSTS_PATH?.trim()) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["GIT_SSH_KNOWN_HOSTS_PATH"],
+      message: "GIT_SSH_KNOWN_HOSTS_PATH is required when GIT_SSH_KEY_PATH is set",
+    });
+  }
 }
 
 const rawEnvSchema = z.object({ ...httpEnvShape, ...storageEnvShape }).superRefine(
   (data, ctx) => {
     if (!data || typeof data !== "object") return;
     refineGitCredentials(data, ctx);
+    if (data.AUTH_MODE === "none") {
+      const isLoopback = isLoopbackHost(data.HOST ?? "0.0.0.0");
+      const allowUnauthenticated = data.ALLOW_UNAUTHENTICATED_NETWORK === "true";
+      if (!isLoopback && !allowUnauthenticated) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["HOST"],
+          message:
+            "AUTH_MODE=none requires a loopback HOST (127.0.0.0/8, ::1, localhost); set ALLOW_UNAUTHENTICATED_NETWORK=true only behind a loopback-only port mapping",
+        });
+      }
+    }
+    if (
+      data.ALLOW_UNAUTHENTICATED_NETWORK !== undefined &&
+      data.ALLOW_UNAUTHENTICATED_NETWORK !== "true" &&
+      data.ALLOW_UNAUTHENTICATED_NETWORK !== "false"
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ALLOW_UNAUTHENTICATED_NETWORK"],
+        message: "ALLOW_UNAUTHENTICATED_NETWORK must be true or false",
+      });
+    }
     if (data.AUTH_MODE === "oidc") {
       if (data.OAUTH_ISSUER === undefined) {
         ctx.addIssue({
@@ -158,12 +269,27 @@ const rawEnvSchema = z.object({ ...httpEnvShape, ...storageEnvShape }).superRefi
           message: "OAUTH_ISSUER must be a valid URL",
         });
       }
-      if (data.OAUTH_JWKS_URI !== undefined && !httpUrl(data.OAUTH_JWKS_URI)) {
-        ctx.addIssue({
-          code: "custom",
-          path: ["OAUTH_JWKS_URI"],
-          message: "OAUTH_JWKS_URI must be a valid URL",
-        });
+      if (data.OAUTH_JWKS_URI !== undefined) {
+        if (!httpUrl(data.OAUTH_JWKS_URI)) {
+          ctx.addIssue({
+            code: "custom",
+            path: ["OAUTH_JWKS_URI"],
+            message: "OAUTH_JWKS_URI must be a valid URL",
+          });
+        } else {
+          try {
+            const parsed = new URL(data.OAUTH_JWKS_URI);
+            if (parsed.protocol !== "https:" && data.OAUTH_ALLOW_INSECURE_ISSUER !== "true") {
+              ctx.addIssue({
+                code: "custom",
+                path: ["OAUTH_JWKS_URI"],
+                message: "OAUTH_JWKS_URI must be https unless OAUTH_ALLOW_INSECURE_ISSUER=true",
+              });
+            }
+          } catch {
+            // Handled by httpUrl
+          }
+        }
       }
       if (
         data.OAUTH_ALLOW_INSECURE_ISSUER !== undefined &&
@@ -228,6 +354,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const raw = result.data;
   const publicBaseUrl = raw.PUBLIC_BASE_URL.replace(/\/+$/, "");
 
+  const trustProxy = parseTrustProxy(raw.TRUST_PROXY);
+  const allowUnauthenticatedNetwork = raw.ALLOW_UNAUTHENTICATED_NETWORK === "true";
+
   let auth: AuthConfig;
   if (raw.AUTH_MODE === "none") {
     auth = { mode: "none" };
@@ -251,6 +380,17 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     const allowInsecureIssuer = raw.OAUTH_ALLOW_INSECURE_ISSUER === "true";
     const uiClientId = raw.OAUTH_UI_CLIENT_ID?.trim();
 
+    const groupsClaim =
+      raw.OAUTH_GROUPS_CLAIM && raw.OAUTH_GROUPS_CLAIM.trim().length > 0 ? raw.OAUTH_GROUPS_CLAIM.trim() : "groups";
+
+    const access: AccessPolicy = {
+      allowedSubjects: parseList(raw.OAUTH_ALLOWED_SUBJECTS),
+      allowedEmails: parseList(raw.OAUTH_ALLOWED_EMAILS).map((s) => s.toLowerCase()),
+      requiredGroups: parseList(raw.OAUTH_REQUIRED_GROUPS),
+      groupsClaim,
+      allowedClientIds: parseList(raw.OAUTH_ALLOWED_CLIENT_IDS),
+    };
+
     auth = {
       mode: "oidc",
       issuer: raw.OAUTH_ISSUER,
@@ -258,6 +398,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       ...(raw.OAUTH_JWKS_URI === undefined ? {} : { jwksUri: raw.OAUTH_JWKS_URI }),
       identityClaims,
       allowInsecureIssuer,
+      access,
       ...(uiClientId ? { uiClientId } : {}),
     };
   }
@@ -273,5 +414,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       write: raw.OAUTH_SCOPE_WRITE,
       admin: raw.OAUTH_SCOPE_ADMIN,
     },
+    allowUnauthenticatedNetwork,
+    trustProxy,
   };
 }

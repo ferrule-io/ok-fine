@@ -1,5 +1,6 @@
 import { type AuthInfo, OAuthError, OAuthErrorCode, type OAuthTokenVerifier } from "@modelcontextprotocol/server";
 import { createRemoteJWKSet, errors, type JWTVerifyGetKey, type JWTVerifyResult, jwtVerify } from "jose";
+import type { AccessPolicy } from "../config.js";
 import type { Principal } from "../service/principal.js";
 
 export interface JwtTokenVerifierOptions {
@@ -7,6 +8,7 @@ export interface JwtTokenVerifierOptions {
   audiences: string[];
   jwksUri: string;
   identityClaims: string[];
+  access?: AccessPolicy;
 }
 
 export interface ScopeNames {
@@ -23,11 +25,13 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
   private readonly audiences: string[];
   private readonly identityClaims: string[];
   private readonly jwks: JWTVerifyGetKey;
+  private readonly access?: AccessPolicy;
 
   constructor(options: JwtTokenVerifierOptions) {
     this.issuer = options.issuer;
     this.audiences = options.audiences;
     this.identityClaims = options.identityClaims;
+    this.access = options.access;
     this.jwks = createRemoteJWKSet(new URL(options.jwksUri), {
       cooldownDuration: 30000,
       cacheMaxAge: 600000,
@@ -105,11 +109,59 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
       }
     }
 
+    if (this.access) {
+      const { allowedSubjects, allowedEmails, requiredGroups, groupsClaim, allowedClientIds } = this.access;
+
+      if (allowedSubjects.length > 0 || allowedEmails.length > 0) {
+        const sub = typeof payload.sub === "string" ? payload.sub : undefined;
+        const subMatch = sub !== undefined && allowedSubjects.includes(sub);
+
+        const email = typeof payload.email === "string" ? payload.email.toLowerCase() : undefined;
+        const emailVerified = payload.email_verified === true;
+        const emailMatch = emailVerified && email !== undefined && allowedEmails.includes(email);
+
+        if (!subMatch && !emailMatch) {
+          throw new OAuthError(OAuthErrorCode.InsufficientScope, "token not permitted by this server's access policy");
+        }
+      }
+
+      if (requiredGroups.length > 0) {
+        const groupsVal = payload[groupsClaim];
+        let tokenGroups: string[] = [];
+        if (typeof groupsVal === "string") {
+          tokenGroups = [groupsVal];
+        } else if (Array.isArray(groupsVal)) {
+          tokenGroups = groupsVal.filter((g): g is string => typeof g === "string");
+        }
+        const hasRequiredGroup = tokenGroups.some((g) => requiredGroups.includes(g));
+        if (!hasRequiredGroup) {
+          throw new OAuthError(OAuthErrorCode.InsufficientScope, "token not permitted by this server's access policy");
+        }
+      }
+
+      if (allowedClientIds.length > 0) {
+        const clientIds = [payload.azp, payload.client_id, payload.cid].filter(
+          (v): v is string => typeof v === "string" && v.length > 0,
+        );
+        const clientAllowed = clientIds.some((id) => allowedClientIds.includes(id));
+        if (!clientAllowed) {
+          throw new OAuthError(OAuthErrorCode.InsufficientScope, "token not permitted by this server's access policy");
+        }
+      }
+    }
+
     let identity: string | null = null;
     for (const claim of this.identityClaims) {
+      if (claim === "email" && payload.email_verified !== true) {
+        continue;
+      }
       const val = payload[claim];
       if (typeof val === "string" && val.trim().length > 0) {
-        identity = val.trim();
+        const trimmed = val.trim();
+        if (claim !== "email" && claim !== "sub" && trimmed.includes("@")) {
+          continue;
+        }
+        identity = trimmed;
         break;
       }
     }
@@ -126,7 +178,6 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
     };
   }
 }
-
 /**
  * Computes a Principal from an AuthInfo and configured scope names.
  * Hierarchy:

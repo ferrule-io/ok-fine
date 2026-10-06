@@ -41,7 +41,7 @@ several repositories) for monorepo splits and multi-repo products.
 
 # Identity provider requirements
 
-- Audience `<PUBLIC_BASE_URL>/mcp`, scopes `okf:read okf:write okf:admin`, JWT access tokens.
+- Audience `<PUBLIC_BASE_URL>/mcp`, JWT access tokens. Agent tokens need scopes `okf:read okf:write`; `okf:admin` is reserved for operators (e.g. project deletion, archive import, and manual sync).
 - The `iss` parameter in authorization responses (RFC 9207); Gemini CLI rejects responses without it.
 - Dynamic client registration or client ID metadata documents, or one public client with loopback redirect URIs
   that developers pass as the client ID below.
@@ -64,7 +64,7 @@ Requires Node.js 24+ and git.
 - Flags go after the package name, e.g. `npx -y @ferrule-io/ok-fine --remote git@github.com:acme/knowledge.git`.
   Gemini CLI uses `settings.json` because `gemini mcp add` would parse `-y` itself.
 - One process serves a data directory, so concurrent sessions need `npx -y @ferrule-io/ok-fine serve --no-auth`
-  running once and the HTTP rows below with `http://localhost:8080/mcp` and no login.
+  running once and the HTTP rows below with `http://localhost:8080/mcp` and no login. (Note that `serve --no-auth` is loopback-only and refuses to start on or accept traffic from non-loopback interfaces.)
 
 # Per-harness setup (shared server)
 

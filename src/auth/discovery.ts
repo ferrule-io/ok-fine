@@ -3,6 +3,7 @@ import { z } from "zod";
 export interface DiscoveryOptions {
   timeoutMs?: number;
   jwksUri?: string;
+  allowInsecureIssuer?: boolean;
 }
 
 export interface DiscoveredAuthorizationServer {
@@ -72,5 +73,16 @@ export async function discoverAuthorizationServer(
     throw new Error(`authorization server discovery failed for ${issuer}: missing jwks_uri`);
   }
 
+  const allowInsecureIssuer = options?.allowInsecureIssuer === true;
+  let parsedJwks: URL;
+  try {
+    parsedJwks = new URL(jwksUri);
+  } catch {
+    throw new Error(`authorization server discovery failed for ${issuer}: invalid jwks_uri`);
+  }
+
+  if (parsedJwks.protocol !== "https:" && !allowInsecureIssuer) {
+    throw new Error(`authorization server discovery failed for ${issuer}: jwks_uri must be https`);
+  }
   return { metadata, jwksUri };
 }

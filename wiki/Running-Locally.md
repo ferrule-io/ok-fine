@@ -31,14 +31,14 @@ ok-fine [stdio|serve] [options]
 | Flag | Variable | Default |
 |---|---|---|
 | `--data-dir <path>` | `DATA_DIR` | `~/.ok-fine` |
-| `--remote <url>` | `GIT_REMOTE_URL` | unset (local only) |
+| `--remote <url>` | `GIT_REMOTE_URL` | unset (local only); accepts `https://`, `ssh://`, `user@host:path`, `file://`, or an absolute path |
 | `--branch <name>` | `GIT_BRANCH` | `main` |
 | `--sync-interval <sec>` | `GIT_SYNC_INTERVAL_SECONDS` | `60`; `0` disables periodic sync |
 | `--log-level <level>` | `LOG_LEVEL` | `info` |
 | `--port <port>` (serve) | `PORT` | `8080` |
 | `--host <addr>` (serve) | `HOST` | `127.0.0.1` |
 | `--public-base-url <url>` (serve) | `PUBLIC_BASE_URL` | `http://localhost:<port>` |
-| `--no-auth` (serve) | `AUTH_MODE=none` | off |
+| `--no-auth` (serve) | `AUTH_MODE=none` | off; refuses non-loopback `--host` without `ALLOW_UNAUTHENTICATED_NETWORK=true` |
 | `-h`, `--help` / `-v`, `--version` | | |
 
 Every variable in [Configuration](https://github.com/ferrule-io/ok-fine/wiki/Configuration) also works; flags win
@@ -55,7 +55,9 @@ The CLI runs git with your own environment and credentials: your ssh-agent and `
 helpers such as osxkeychain or `gh auth setup-git`. ok-fine cannot answer prompts (git runs without a terminal), so
 accept the host key and unlock keys beforehand, for example by running `git ls-remote <url>` once. Your git hooks
 and global ignore and attributes files are not applied to the knowledge repository. An explicit `GIT_SSH_KEY_PATH`
-still overrides your ssh setup.
+still overrides your ssh setup, and now also requires `GIT_SSH_KNOWN_HOSTS_PATH`. When configured, `--remote` or
+`GIT_REMOTE_URL` must use a supported format: `https://…`, `ssh://…`, scp-style `user@host:path`, `file://…`, or an
+absolute local path (insecure `http://` and relative paths are rejected).
 
 # Several sessions at once
 
@@ -89,6 +91,14 @@ ok-fine from (compared case-insensitively); with no email configured, `human:` a
 [Authentication and authorization](https://github.com/ferrule-io/ok-fine/wiki/Authentication-and-Authorization).
 
 > **Warning:** `--no-auth` (`AUTH_MODE=none`) disables authentication completely and gives every caller full admin
-> access. Keep `--host` on loopback.
+> access. Keep `--host` on loopback. `--no-auth` refuses to start on a non-loopback `--host`/`HOST` (127.0.0.0/8, ::1, localhost) unless `ALLOW_UNAUTHENTICATED_NETWORK=true` is set.
 
 The read-only web UI is at `http://localhost:<port>/ui/`.
+
+# HTTP with Docker
+
+To run the container locally with authentication disabled behind a loopback port mapping, set `ALLOW_UNAUTHENTICATED_NETWORK=true` (since the container listens on `0.0.0.0`):
+
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 -e AUTH_MODE=none -e ALLOW_UNAUTHENTICATED_NETWORK=true -e PUBLIC_BASE_URL=http://localhost:8080 -v okf-data:/data ghcr.io/ferrule-io/ok-fine:latest
+```

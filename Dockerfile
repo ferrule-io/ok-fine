@@ -12,7 +12,7 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig.json tsconfig.build.json ./
 COPY src src
 COPY web web
-RUN pnpm build
+RUN pnpm build && rm -rf dist/dev
 
 FROM node:24-bookworm-slim
 RUN apt-get update \

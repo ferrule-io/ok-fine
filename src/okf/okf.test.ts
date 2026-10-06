@@ -257,6 +257,84 @@ def compute():
     expect(logIssues.some((i) => i.code === "log_bad_date_heading")).toBe(true);
   });
 
+  it("lint checks sources for valid commit and safe resource", () => {
+    const mockCtx = {
+      now: new Date("2026-10-05T12:00:00Z"),
+      conceptExists: () => true,
+      fileExists: () => true,
+    };
+
+    // Clean source producing no warnings or errors
+    const cleanConcept = `---
+type: Decision
+title: Clean Source
+sources:
+  - id: agents-md
+    resource: github.com/ferrule-io/ok-fine/AGENTS.md
+    commit: 02257c2f38b9ddc559bbda7eb00f906aa98a5ec1
+---
+
+# Decision
+
+Clean content.
+`;
+    const cleanIssues = lintConceptFile("decisions/clean.md", cleanConcept, mockCtx);
+    const cleanErrorsAndWarnings = cleanIssues.filter((i) => i.severity === "error" || i.severity === "warning");
+    expect(cleanErrorsAndWarnings).toEqual([]);
+
+    // Bad commit: present but not matching hex pattern (warning-level, never error)
+    const badCommitConcept = `---
+type: Decision
+title: Bad Commit
+sources:
+  - id: agents-md
+    resource: github.com/ferrule-io/ok-fine/AGENTS.md
+    commit: not-a-valid-hex-commit
+---
+
+# Decision
+`;
+    const badCommitIssues = lintConceptFile("decisions/bad-commit.md", badCommitConcept, mockCtx);
+    expect(badCommitIssues.filter((i) => i.severity === "error")).toEqual([]);
+    const commitWarning = badCommitIssues.find((i) => i.code === "invalid_commit");
+    expect(commitWarning).toBeDefined();
+    expect(commitWarning?.severity).toBe("warning");
+
+    // Short commit (<7 chars) produces invalid_commit warning
+    const shortCommitConcept = `---
+type: Decision
+title: Short Commit
+sources:
+  - id: agents-md
+    resource: github.com/ferrule-io/ok-fine/AGENTS.md
+    commit: 123456
+---
+
+# Decision
+`;
+    const shortCommitIssues = lintConceptFile("decisions/short-commit.md", shortCommitConcept, mockCtx);
+    expect(shortCommitIssues.some((i) => i.code === "invalid_commit" && i.severity === "warning")).toBe(true);
+
+    // Bad resource: contains shell metacharacters or whitespace (warning-level, never error)
+    for (const badChar of ["`", "$", ";", "|", "&", "<", ">", "(", ")", "\\", "\n", " ", "\t", "'", '"']) {
+      const badResourceConcept = `---
+type: Decision
+title: Bad Resource
+sources:
+  - id: agents-md
+    resource: ${JSON.stringify(`github.com/ferrule-io/ok-fine/AGENTS${badChar}md`)}
+---
+
+# Decision
+`;
+      const badResourceIssues = lintConceptFile("decisions/bad-resource.md", badResourceConcept, mockCtx);
+      expect(badResourceIssues.filter((i) => i.severity === "error")).toEqual([]);
+      const resourceWarning = badResourceIssues.find((i) => i.code === "invalid_resource");
+      expect(resourceWarning).toBeDefined();
+      expect(resourceWarning?.severity).toBe("warning");
+    }
+  });
+
   it("isoAfterDays calculates ISO 8601 UTC date offset by specified days", () => {
     const fixed = new Date("2026-10-05T12:00:00Z");
     expect(isoAfterDays(fixed, 180)).toBe("2027-04-03T12:00:00Z");

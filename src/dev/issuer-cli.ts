@@ -4,7 +4,7 @@ import { startDevIssuer } from "./issuer.js";
 // namespace; only a plain integer is treated as a port override.
 const rawPort = process.env.DEV_ISSUER_PORT ?? "";
 const port = /^\d+$/.test(rawPort) ? Number(rawPort) : 9000;
-const host = process.env.DEV_ISSUER_HOST ?? "0.0.0.0";
+const host = process.env.DEV_ISSUER_HOST ?? "127.0.0.1";
 const issuerUrl = process.env.DEV_ISSUER_URL ?? "http://localhost:9000";
 const audience = process.env.DEV_ISSUER_AUDIENCE ?? "http://localhost:8080/mcp";
 

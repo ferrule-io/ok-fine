@@ -25,7 +25,7 @@ remotes, flags, and several concurrent sessions: [Running locally](https://githu
 
 ### HTTP server (REST + MCP)
 
-> **Warning:** `--no-auth` / `AUTH_MODE=none` disables authentication completely and gives every caller full admin access. Never expose it beyond localhost.
+> **Warning:** `--no-auth` / `AUTH_MODE=none` disables authentication completely and gives every caller full admin access. Never expose it beyond localhost. `--no-auth` refuses to start on a non-loopback `--host`/`HOST` (127.0.0.0/8, ::1, localhost) unless `ALLOW_UNAUTHENTICATED_NETWORK=true`.
 
 ```sh
 npx -y @ferrule-io/ok-fine serve --no-auth
@@ -34,7 +34,7 @@ npx -y @ferrule-io/ok-fine serve --no-auth
 Or with Docker (requires Docker):
 
 ```sh
-docker run --rm -p 127.0.0.1:8080:8080 -e AUTH_MODE=none -e PUBLIC_BASE_URL=http://localhost:8080 -v okf-data:/data ghcr.io/ferrule-io/ok-fine:latest
+docker run --rm -p 127.0.0.1:8080:8080 -e AUTH_MODE=none -e ALLOW_UNAUTHENTICATED_NETWORK=true -e PUBLIC_BASE_URL=http://localhost:8080 -v okf-data:/data ghcr.io/ferrule-io/ok-fine:latest
 ```
 
 Or, from a checkout, with Docker Compose (pulls the published image, or builds it from source when the pull fails):

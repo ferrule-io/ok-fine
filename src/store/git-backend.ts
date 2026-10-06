@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, rm, rmdir, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, rm, rmdir } from "node:fs/promises";
 import { join, posix } from "node:path";
 import type { Readable } from "node:stream";
 import type { Logger, StorageConfig } from "../config.js";
@@ -17,10 +17,14 @@ import type {
   TransactionResult,
 } from "./backend.js";
 import type { BundleTree } from "./bundle.js";
-import { atomicWrite, isDirectory, listTreeFiles, pathExists } from "./fs-util.js";
+import { assertContainedPath, atomicWrite, listTreeFiles, pathExists } from "./fs-util.js";
 import { Git, isPushRejection, redactRemote } from "./git.js";
 import { Mutex } from "./mutex.js";
 import { PathIndex } from "./path-index.js";
+
+const REMOTE_BASE_REF = "refs/ok-fine/remote-base";
+const REMOTE_REWRITTEN_MSG =
+  "remote history was rewritten; syncing halted. Stop ok-fine, remove DATA_DIR/repo, and restart to re-clone";
 
 function extractChangedProjects(diffOutput: string): string[] {
   const lines = diffOutput
@@ -47,12 +51,14 @@ class GitTx implements StorageTx {
   ) {}
 
   async writeFile(project: string, path: string, content: string | Buffer): Promise<void> {
+    await assertContainedPath(this.repoDir, project, path);
     await atomicWrite(join(this.repoDir, project, path), content);
     this.index.add(project, path);
     this.touched = true;
   }
 
   async deleteFile(project: string, path: string): Promise<void> {
+    await assertContainedPath(this.repoDir, project, path);
     const projectDir = join(this.repoDir, project);
     await rm(join(projectDir, path), { force: true });
     let dir = posix.dirname(path);
@@ -73,16 +79,40 @@ class GitTx implements StorageTx {
   }
 
   async deleteProject(project: string): Promise<void> {
-    await rm(join(this.repoDir, project), { recursive: true, force: true });
+    const projectDir = join(this.repoDir, project);
+    try {
+      const s = await lstat(projectDir);
+      if (s.isSymbolicLink()) {
+        await rm(projectDir, { force: true });
+      } else {
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
+    }
     this.index.setProject(project, []);
     this.touched = true;
   }
 
   async replaceProject(project: string, source: BundleSource): Promise<void> {
     const projectDir = join(this.repoDir, project);
-    await rm(projectDir, { recursive: true, force: true });
+    try {
+      const s = await lstat(projectDir);
+      if (s.isSymbolicLink()) {
+        await rm(projectDir, { force: true });
+      } else {
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
+    }
     const written: string[] = [];
     for (const path of source.paths) {
+      await assertContainedPath(this.repoDir, project, path);
       const content = await source.read(path);
       if (content !== null) {
         await atomicWrite(join(projectDir, path), content);
@@ -125,6 +155,7 @@ export class GitBackend implements StorageBackend {
 
   async close(): Promise<void> {
     await this.mutex.idle();
+    await this.git.close();
   }
 
   async projects(): Promise<string[]> {
@@ -140,18 +171,29 @@ export class GitBackend implements StorageBackend {
       return null;
     }
     try {
-      return await readFile(join(this.repoDir, project, path));
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      await assertContainedPath(this.repoDir, project, path);
+      const fullPath = join(this.repoDir, project, path);
+      const s = await lstat(fullPath);
+      if (s.isSymbolicLink() || !s.isFile()) {
         return null;
       }
-      throw err;
+      return await readFile(fullPath);
+    } catch {
+      return null;
     }
   }
 
   private async reindexProject(project: string): Promise<void> {
     const dir = join(this.repoDir, project);
-    const paths = (await isDirectory(dir)) ? await listTreeFiles(dir) : [];
+    let paths: string[] = [];
+    try {
+      const s = await lstat(dir);
+      if (!s.isSymbolicLink() && s.isDirectory()) {
+        paths = await listTreeFiles(dir);
+      }
+    } catch {
+      paths = [];
+    }
     this.index.setProject(project, paths);
   }
 
@@ -239,6 +281,7 @@ export class GitBackend implements StorageBackend {
         if (remoteBranchExists) {
           await repo.git.run(["checkout", "-B", config.gitBranch, `origin/${config.gitBranch}`]);
           headHasCommits = true;
+          await repo.setRememberedRemoteTip(remoteBranchRev.stdout.trim());
         } else {
           // Initialize empty bundle root files
           await repo.ensureAttributesAndIgnore();
@@ -252,6 +295,8 @@ export class GitBackend implements StorageBackend {
             allowFail: true,
           });
           headHasCommits = true;
+          const initialHead = (await repo.git.run(["rev-parse", "HEAD"])).stdout.trim();
+          await repo.setRememberedRemoteTip(initialHead);
         }
       } else {
         await repo.sync();
@@ -282,9 +327,13 @@ export class GitBackend implements StorageBackend {
           "okf: configure merge and ignore attributes",
         ]);
         if (repo.hasRemote) {
-          await repo.git.run(["push", "origin", `HEAD:refs/heads/${config.gitBranch}`], {
+          const pushRes = await repo.git.run(["push", "origin", `HEAD:refs/heads/${config.gitBranch}`], {
             allowFail: true,
           });
+          if (pushRes.code === 0) {
+            const headSha = (await repo.git.run(["rev-parse", "HEAD"])).stdout.trim();
+            await repo.setRememberedRemoteTip(headSha);
+          }
         }
       }
     }
@@ -293,15 +342,56 @@ export class GitBackend implements StorageBackend {
     return repo;
   }
 
+  private async getRememberedRemoteTip(): Promise<string | null> {
+    const res = await this.git.run(["rev-parse", "--verify", REMOTE_BASE_REF], {
+      allowFail: true,
+    });
+    if (res.code === 0 && res.stdout.trim().length > 0) {
+      return res.stdout.trim();
+    }
+    return null;
+  }
+
+  private async setRememberedRemoteTip(sha: string): Promise<void> {
+    await this.git.run(["update-ref", REMOTE_BASE_REF, sha], { allowFail: true });
+  }
+
+  private async isRemoteAncestorHalted(remoteTip: string): Promise<boolean> {
+    const rememberedTip = await this.getRememberedRemoteTip();
+    if (!rememberedTip) {
+      await this.setRememberedRemoteTip(remoteTip);
+      return false;
+    }
+    if (rememberedTip === remoteTip) {
+      return false;
+    }
+    const ancestorCheck = await this.git.run(["merge-base", "--is-ancestor", rememberedTip, remoteTip], {
+      allowFail: true,
+    });
+    if (ancestorCheck.code !== 0) {
+      this.lastError = REMOTE_REWRITTEN_MSG;
+      this.log.error({ rememberedTip, remoteTip }, REMOTE_REWRITTEN_MSG);
+      return true;
+    }
+    return false;
+  }
+
   private async ensureAttributesAndIgnore(): Promise<boolean> {
     let changed = false;
 
     const gitattributesPath = join(this.repoDir, ".gitattributes");
     let attrContent = "";
     try {
-      attrContent = await readFile(gitattributesPath, "utf8");
-    } catch {
-      // not exists
+      const s = await lstat(gitattributesPath);
+      if (s.isSymbolicLink()) {
+        await rm(gitattributesPath, { force: true });
+      } else {
+        attrContent = await readFile(gitattributesPath, "utf8");
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
     }
 
     const requiredAttrLines = ["**/index.md merge=union", "**/log.md merge=union"];
@@ -317,7 +407,7 @@ export class GitBackend implements StorageBackend {
     }
 
     if (newAttrContent !== attrContent) {
-      await writeFile(gitattributesPath, newAttrContent, "utf8");
+      await atomicWrite(gitattributesPath, newAttrContent);
       await this.git.run(["add", ".gitattributes"]);
       changed = true;
     }
@@ -325,9 +415,16 @@ export class GitBackend implements StorageBackend {
     const gitignorePath = join(this.repoDir, ".gitignore");
     let ignoreContent = "";
     try {
-      ignoreContent = await readFile(gitignorePath, "utf8");
-    } catch {
-      // not exists
+      const s = await lstat(gitignorePath);
+      if (s.isSymbolicLink()) {
+        await rm(gitignorePath, { force: true });
+      } else {
+        ignoreContent = await readFile(gitignorePath, "utf8");
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw err;
+      }
     }
 
     const requiredIgnoreLine = ".*.tmp";
@@ -340,7 +437,7 @@ export class GitBackend implements StorageBackend {
     }
 
     if (newIgnoreContent !== ignoreContent) {
-      await writeFile(gitignorePath, newIgnoreContent, "utf8");
+      await atomicWrite(gitignorePath, newIgnoreContent);
       await this.git.run(["add", ".gitignore"]);
       changed = true;
     }
@@ -412,6 +509,7 @@ export class GitBackend implements StorageBackend {
   ): Promise<TransactionResult<T>> {
     return this.mutex.run(async () => {
       const warnings: string[] = [];
+      let syncHalted = false;
 
       // Step 1: Remote sync check before work
       if (this.hasRemote) {
@@ -421,22 +519,35 @@ export class GitBackend implements StorageBackend {
           const firstLine = fetchRes.stderr.split(/\r?\n/)[0] ?? "unknown error";
           warnings.push(`remote unreachable: ${firstLine}`);
         } else {
-          const behindRes = await this.git.run(["rev-list", "--count", `HEAD..origin/${this.config.gitBranch}`], {
+          const remoteRevRes = await this.git.run(["rev-parse", "--verify", `origin/${this.config.gitBranch}`], {
             allowFail: true,
           });
-          const behind = Number.parseInt(behindRes.stdout.trim(), 10) || 0;
-
-          if (behind > 0) {
-            const before = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
-            const rebaseRes = await this.git.run(["rebase", `origin/${this.config.gitBranch}`], { allowFail: true });
-
-            if (rebaseRes.code !== 0) {
-              warnings.push(await this.preserveConflict());
+          if (remoteRevRes.code === 0) {
+            const remoteTip = remoteRevRes.stdout.trim();
+            if (await this.isRemoteAncestorHalted(remoteTip)) {
+              syncHalted = true;
+              warnings.push(this.lastError ?? REMOTE_REWRITTEN_MSG);
             }
-            const after = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
-            if (before !== after) {
-              const diffRes = await this.git.run(["diff", "--name-only", before, after]);
-              await this.resync(extractChangedProjects(diffRes.stdout));
+          }
+
+          if (!syncHalted) {
+            const behindRes = await this.git.run(["rev-list", "--count", `HEAD..origin/${this.config.gitBranch}`], {
+              allowFail: true,
+            });
+            const behind = Number.parseInt(behindRes.stdout.trim(), 10) || 0;
+
+            if (behind > 0) {
+              const before = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
+              const rebaseRes = await this.git.run(["rebase", `origin/${this.config.gitBranch}`], { allowFail: true });
+
+              if (rebaseRes.code !== 0) {
+                warnings.push(await this.preserveConflict());
+              }
+              const after = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
+              if (before !== after) {
+                const diffRes = await this.git.run(["diff", "--name-only", before, after]);
+                await this.resync(extractChangedProjects(diffRes.stdout));
+              }
             }
           }
         }
@@ -470,47 +581,67 @@ export class GitBackend implements StorageBackend {
         // Step 4: Push commit if made
         let pushed: boolean | null = null;
         if (commitSha !== null && this.hasRemote) {
-          let pushSuccess = false;
-          for (let attempt = 0; attempt < 3; attempt++) {
-            const pushRes = await this.git.run(["push", "origin", `HEAD:refs/heads/${this.config.gitBranch}`], {
-              allowFail: true,
-            });
-
-            if (pushRes.code === 0) {
-              pushSuccess = true;
-              pushed = true;
-              break;
-            }
-
-            if (isPushRejection(pushRes.stderr)) {
-              const pre = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
-              await this.git.run(["fetch", "origin", this.config.gitBranch], { allowFail: true });
-              const rebaseRes = await this.git.run(["rebase", `origin/${this.config.gitBranch}`], { allowFail: true });
-
-              if (rebaseRes.code === 0) {
-                const post = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
-                const diffRes = await this.git.run(["diff", "--name-only", pre, post]);
-                await this.resync(extractChangedProjects(diffRes.stdout));
-              } else {
-                await this.git.run(["rebase", "--abort"], { allowFail: true });
-                await this.git.run(["reset", "--hard", `origin/${this.config.gitBranch}`]);
-                await this.resync(spec.projects);
-                throw new OkfError(
-                  "upstream_conflict",
-                  409,
-                  "change conflicts with a concurrent upstream edit; re-read and retry",
-                );
-              }
-            } else {
-              pushed = false;
-              const firstLine = pushRes.stderr.split(/\r?\n/)[0] ?? "unknown error";
-              warnings.push(`push failed; will retry on next sync: ${firstLine}`);
-              break;
-            }
-          }
-
-          if (!pushSuccess && pushed === null) {
+          if (syncHalted) {
             pushed = false;
+          } else {
+            let pushSuccess = false;
+            for (let attempt = 0; attempt < 3; attempt++) {
+              const pushRes = await this.git.run(["push", "origin", `HEAD:refs/heads/${this.config.gitBranch}`], {
+                allowFail: true,
+              });
+
+              if (pushRes.code === 0) {
+                pushSuccess = true;
+                pushed = true;
+                await this.setRememberedRemoteTip(commitSha);
+                break;
+              }
+
+              if (isPushRejection(pushRes.stderr)) {
+                const pre = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
+                await this.git.run(["fetch", "origin", this.config.gitBranch], { allowFail: true });
+
+                const remoteRevRes = await this.git.run(["rev-parse", "--verify", `origin/${this.config.gitBranch}`], {
+                  allowFail: true,
+                });
+                if (remoteRevRes.code === 0) {
+                  const remoteTip = remoteRevRes.stdout.trim();
+                  if (await this.isRemoteAncestorHalted(remoteTip)) {
+                    pushed = false;
+                    warnings.push(this.lastError ?? REMOTE_REWRITTEN_MSG);
+                    break;
+                  }
+                }
+
+                const rebaseRes = await this.git.run(["rebase", `origin/${this.config.gitBranch}`], {
+                  allowFail: true,
+                });
+
+                if (rebaseRes.code === 0) {
+                  const post = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
+                  const diffRes = await this.git.run(["diff", "--name-only", pre, post]);
+                  await this.resync(extractChangedProjects(diffRes.stdout));
+                } else {
+                  await this.git.run(["rebase", "--abort"], { allowFail: true });
+                  await this.git.run(["reset", "--hard", `origin/${this.config.gitBranch}`]);
+                  await this.resync(spec.projects);
+                  throw new OkfError(
+                    "upstream_conflict",
+                    409,
+                    "change conflicts with a concurrent upstream edit; re-read and retry",
+                  );
+                }
+              } else {
+                pushed = false;
+                const firstLine = pushRes.stderr.split(/\r?\n/)[0] ?? "unknown error";
+                warnings.push(`push failed; will retry on next sync: ${firstLine}`);
+                break;
+              }
+            }
+
+            if (!pushSuccess && pushed === null) {
+              pushed = false;
+            }
           }
         }
 
@@ -541,6 +672,18 @@ export class GitBackend implements StorageBackend {
 
       if (fetchRes.code !== 0) {
         this.lastError = fetchRes.stderr.split(/\r?\n/)[0] ?? "fetch failed";
+        return this.syncStatus();
+      }
+      const remoteRevRes = await this.git.run(["rev-parse", "--verify", `origin/${this.config.gitBranch}`], {
+        allowFail: true,
+      });
+      if (remoteRevRes.code !== 0) {
+        this.lastError = "remote ref not found";
+        return this.syncStatus();
+      }
+      const remoteTip = remoteRevRes.stdout.trim();
+
+      if (await this.isRemoteAncestorHalted(remoteTip)) {
         return this.syncStatus();
       }
 
@@ -575,7 +718,12 @@ export class GitBackend implements StorageBackend {
         if (pushRes.code !== 0) {
           const pushError = `push failed: ${pushRes.stderr.split(/\r?\n/)[0] ?? "unknown error"}`;
           runError = runError ? `${runError}; ${pushError}` : pushError;
+        } else {
+          const headSha = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
+          await this.setRememberedRemoteTip(headSha);
         }
+      } else {
+        await this.setRememberedRemoteTip(remoteTip);
       }
 
       // lastError describes the most recent sync run only.

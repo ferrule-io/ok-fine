@@ -96,7 +96,7 @@ const CONTENT_TYPE_BY_EXTENSION: Record<string, string> = {
 };
 
 const searchQuery = z.object({
-  q: z.string().optional(),
+  q: z.string().max(512).optional(),
   project: z.string().optional(),
   type: z.string().optional(),
   tag: z.union([z.string(), z.array(z.string())]).optional(),

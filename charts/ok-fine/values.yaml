@@ -16,8 +16,9 @@ config:
   maxFileBytes: 1048576
   maxArchiveBytes: 52428800
   defaultStaleAfterDays: null  # opt-in: stamps stale_after = now + N days on write_concept when omitted
+  trustProxy: ""               # optional: boolean, integer hop count, or CIDR/keyword string (e.g. "loopback,linklocal,uniquelocal")
 auth:
-  mode: oidc         # oidc (default) validates JWTs from oauth.issuer; none disables authentication entirely — every request gets admin access; local testing only, never expose
+  mode: oidc         # oidc (default) validates JWTs from oauth.issuer; none disables authentication entirely — every request gets admin access; local testing only, unauthenticated admin access must not be routed publicly (ingress and httpRoute must be disabled; use kubectl port-forward)
 oauth:               # used only when auth.mode=oidc
   issuer: ""         # REQUIRED; must equal the access token `iss` exactly
   audiences: []      # default ["<publicBaseUrl>/mcp"]
@@ -28,6 +29,11 @@ oauth:               # used only when auth.mode=oidc
     admin: okf:admin
   identityClaims: [email, preferred_username, sub]
   allowInsecureIssuer: false   # development only (http:// issuer)
+  allowedSubjects: []          # optional: restrict access to specific JWT sub claims
+  allowedEmails: []            # optional: restrict access to specific verified email claims
+  requiredGroups: []           # optional: restrict access to callers with these groups
+  groupsClaim: ""              # optional: claim containing user groups (default: "groups")
+  allowedClientIds: []         # optional: restrict access to specific OAuth client IDs (azp / client_id)
   uiClientId: ""   # public client for the web UI (auth code + PKCE, redirect <publicBaseUrl>/ui/callback); empty = dynamic client registration
 git:
   branch: main
@@ -36,7 +42,7 @@ git:
     auth: none       # none | ssh | https
     existingSecret: ""
     sshPrivateKeyKey: ssh-privatekey
-    knownHostsKey: known_hosts   # optional key; when absent the host key is trusted on first use
+    knownHostsKey: known_hosts   # required when auth is ssh: secret key containing SSH known_hosts
     httpUsernameKey: username
     httpPasswordKey: password
     syncIntervalSeconds: 60
@@ -58,6 +64,7 @@ ingress:
   annotations: {}
   tls:
     secretName: ""
+    terminatedUpstream: false  # set true if TLS is terminated upstream (e.g. cloud load balancer or edge proxy)
 httpRoute:
   enabled: false
   annotations: {}

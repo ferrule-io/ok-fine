@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
+import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
@@ -149,7 +151,7 @@ describe("ok-fine end to end", () => {
       await issuer.mintToken({
         scope: "okf:read okf:write okf:admin",
         username: "alice",
-        claims: { email: "Alice@Example.com" },
+        claims: { email: "Alice@Example.com", email_verified: true },
       }),
     );
     const created = await call(client, "create_project", { project: "demo", title: "Demo", actor: "e2e/1.0" });
@@ -228,6 +230,41 @@ describe("ok-fine end to end", () => {
     const challenge = res.headers.get("www-authenticate") ?? "";
     expect(challenge).toContain("insufficient_scope");
     expect(challenge).toContain('scope="okf:write"');
+  });
+
+  it("rejects unauthenticated request with large body immediately without buffering", async () => {
+    const url = new URL(server.url);
+    const result = await new Promise<string>((resolve, reject) => {
+      const client = net.connect({ port: Number(url.port), host: url.hostname }, () => {
+        client.write(
+          "PUT /api/v1/projects/demo/archive HTTP/1.1\r\n" +
+            `Host: ${url.host}\r\n` +
+            "Content-Type: application/gzip\r\n" +
+            "Content-Length: 40000000\r\n" +
+            "Connection: close\r\n" +
+            "\r\n" +
+            "partial",
+        );
+      });
+      let response = "";
+      client.on("data", (chunk) => {
+        response += chunk.toString("utf-8");
+        if (response.includes("HTTP/1.1 401")) {
+          client.destroy();
+          resolve(response);
+        }
+      });
+      client.on("error", reject);
+      client.on("close", () => {
+        if (response.includes("HTTP/1.1 401")) {
+          resolve(response);
+        } else {
+          reject(new Error(`Expected 401, got: ${response}`));
+        }
+      });
+    });
+    expect(result).toContain("HTTP/1.1 401");
+    expect(result).toContain("www-authenticate");
   });
 });
 
@@ -365,6 +402,90 @@ describe("ok-fine with AUTH_MODE=none", () => {
   it("returns 404 for oauth-protected-resource endpoint", async () => {
     const res = await fetch(`${noneServer.url}/.well-known/oauth-protected-resource/mcp`);
     expect(res.status).toBe(404);
+  });
+
+  it("rejects requests with forbidden Host header in AUTH_MODE=none", async () => {
+    const url = new URL(noneServer.url);
+    const res = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: url.hostname,
+          port: url.port,
+          path: "/api/v1/projects",
+          method: "GET",
+          headers: { Host: "evil.example" },
+        },
+        (r) => {
+          let body = "";
+          r.on("data", (chunk) => (body += chunk));
+          r.on("end", () => resolve({ statusCode: r.statusCode ?? 0, body }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(res.statusCode).toBe(403);
+    const json = JSON.parse(res.body) as { error?: { code?: string } };
+    expect(json.error?.code).toBe("forbidden");
+  });
+
+  it("rejects requests with forbidden Origin header in AUTH_MODE=none", async () => {
+    const res = await fetch(`${noneServer.url}/api/v1/projects`, {
+      headers: { origin: "http://evil.example" },
+    });
+    expect(res.status).toBe(403);
+    const json = (await res.json()) as { error?: { code?: string } };
+    expect(json.error?.code).toBe("forbidden");
+  });
+
+  it("accepts requests with localhost Host header in AUTH_MODE=none", async () => {
+    const url = new URL(noneServer.url);
+    const res = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: url.hostname,
+          port: url.port,
+          path: "/api/v1/projects",
+          method: "GET",
+          headers: { Host: `localhost:${url.port}` },
+        },
+        (r) => {
+          let body = "";
+          r.on("data", (chunk) => (body += chunk));
+          r.on("end", () => resolve({ statusCode: r.statusCode ?? 0, body }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(res.statusCode).toBe(200);
+    const json = JSON.parse(res.body) as { projects?: unknown[] };
+    expect(json.projects).toBeDefined();
+  });
+
+  it("exempts GET /healthz from Host validation for kubelet probes in AUTH_MODE=none", async () => {
+    const url = new URL(noneServer.url);
+    const res = await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: url.hostname,
+          port: url.port,
+          path: "/healthz",
+          method: "GET",
+          headers: { Host: "10.0.0.5:8080" },
+        },
+        (r) => {
+          let body = "";
+          r.on("data", (chunk) => (body += chunk));
+          r.on("end", () => resolve({ statusCode: r.statusCode ?? 0, body }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(res.statusCode).toBe(200);
+    const json = JSON.parse(res.body) as { status?: string };
+    expect(json.status).toBe("ok");
   });
 
   it("serves client config with auth off", async () => {
