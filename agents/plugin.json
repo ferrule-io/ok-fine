@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "ok-fine",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Use an ok-fine knowledge server as shared project memory: resolve the current repository's project, recall before work, record durable knowledge, onboard and review repositories.",
   "author": {
     "name": "ferrule-io"
