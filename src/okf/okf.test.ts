@@ -68,6 +68,10 @@ generated: { by: test-agent/1.0, at: 2026-06-30T14:00:00Z }
     expect(trustTier({ verified: [] })).toBe("unverified");
     expect(trustTier({ verified: { by: "human:a", at: "2026-01-01T00:00:00Z" } })).toBe("human-reviewed");
     expect(trustTier({ verified: [{ by: "process:x" }] })).toBe("machine-confirmed");
+    expect(trustTier({ proposal: { ref: "https://example.com/pr/1" }, verified: [{ by: "human:a" }] })).toBe(
+      "proposed",
+    );
+    expect(trustTier({ proposal: null, verified: [{ by: "process:x" }] })).toBe("machine-confirmed");
   });
 
   it("staleness boundary and effective status", () => {

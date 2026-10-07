@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { OkfError } from "../errors.js";
 import { parseFrontmatter, splitFrontmatter } from "../okf/frontmatter.js";
+import { TRUST_TIERS } from "../okf/semantics.js";
 import type { KnowledgeService } from "../service/knowledge-service.js";
 import type { Principal } from "../service/principal.js";
 
@@ -101,7 +102,7 @@ const searchQuery = z.object({
   type: z.string().optional(),
   tag: z.union([z.string(), z.array(z.string())]).optional(),
   status: z.enum(["draft", "stable", "deprecated"]).optional(),
-  trustTier: z.enum(["unverified", "machine-confirmed", "human-reviewed"]).optional(),
+  trustTier: z.enum(TRUST_TIERS).optional(),
   stale: z.enum(["true", "false"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });

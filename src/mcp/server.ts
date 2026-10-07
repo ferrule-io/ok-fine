@@ -2,6 +2,7 @@ import { type CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import type { Logger } from "../config.js";
 import { OkfError } from "../errors.js";
+import { TRUST_TIERS } from "../okf/semantics.js";
 import { FEEDBACK_TYPES, feedbackLink } from "../service/feedback.js";
 import type { KnowledgeService } from "../service/knowledge-service.js";
 import type { Principal } from "../service/principal.js";
@@ -9,7 +10,7 @@ import { VERSION } from "../version.js";
 
 export const INSTRUCTIONS = `ok-fine holds shared project knowledge outside the codebase, as OKF v0.2 markdown concepts grouped into projects. In a git repository, first run \`git remote get-url origin\` and call list_projects with that URL as \`repository\`; use the returned project(s) for every read and write. If none match, say the repository is not onboarded and offer to onboard it (ok-fine-onboard skill). Search before planning or editing; record durable decisions, conventions, and runbooks afterwards.
 1. Discover: get_index (progressive disclosure) or search_concepts with \`project\`.
-2. Read: read_concept returns frontmatter, body, trust tier (unverified | machine-confirmed | human-reviewed), staleness, and links. Freshness comes first: a concept that is stale, when its code sources changed since \`sources[].commit\`, or when that commit is not an ancestor of HEAD (unmerged or rebased away), is a lead to re-check whatever its tier; among fresh concepts prefer higher trust tiers. Knowledge about unmerged work goes into \`proposals/<slug>\` concepts with a \`proposal: { ref: <URI> }\` frontmatter key, never into current-state concepts; concepts carrying \`proposal\` are not current truth. Deprecated concepts are history; when code contradicts a concept, trust the code and update the concept.
+2. Read: read_concept returns frontmatter, body, trust tier (proposed | unverified | machine-confirmed | human-reviewed), staleness, and links. Freshness comes first: a concept that is stale, when its code sources changed since \`sources[].commit\`, or when that commit is not an ancestor of HEAD (unmerged or rebased away), is a lead to re-check whatever its tier; among fresh concepts prefer higher trust tiers. Knowledge about unmerged work is written at its usual id (e.g. \`decisions/<slug>\`, never over an existing concept) with a \`proposal: { ref: <URI> }\` frontmatter key; such concepts have trust tier \`proposed\` and are not current truth. When one you read has landed in the mainline, rewrite it as current truth without the \`proposal\` key and verify it; when its work was abandoned, set \`status: deprecated\`. Deprecated concepts are history; when code contradicts a concept, trust the code and update the concept.
 3. Write: write_concept with frontmatter containing \`type\` (e.g. Decision, Convention, Architecture, Component, Playbook, Interface, Reference) plus \`title\`, \`description\`, \`tags\`, and \`stale_after\` (ISO 8601, e.g. 180 days ahead). Record provenance in \`sources\` (each with \`resource\` and a stable \`id\`; code sources carry \`commit\`) and cite claims with footnotes [^id]. Link concepts with bundle-absolute links such as [orders](/tables/orders.md). After re-checking a concept against the code, refresh \`sources[].commit\` and \`stale_after\` with write_concept, then call verify_concept.
 4. Pass \`actor\` as <harness>/<model> (e.g. claude-code/claude-opus-4-5, codex/gpt-5-codex, gemini-cli/gemini-2.5-pro). Use human:<email>, with the email from \`git config user.email\`, only when the user personally reviewed the concept; on forbidden_actor, report both identities instead of retrying as another. The server stamps \`generated\`; \`verified\` changes only through verify_concept.
 5. When updating, pass expectedRevision from read_concept (null to create only).
@@ -137,7 +138,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
         type: z.string().optional(),
         tags: z.array(z.string()).optional(),
         status: z.enum(["draft", "stable", "deprecated"]).optional().describe("omitted hides deprecated"),
-        trustTier: z.enum(["unverified", "machine-confirmed", "human-reviewed"]).optional(),
+        trustTier: z.enum(TRUST_TIERS).optional(),
         stale: z.boolean().optional(),
         limit,
       }),

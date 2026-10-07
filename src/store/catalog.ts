@@ -44,7 +44,8 @@ interface IndexedDoc {
 function tierRank(tier: TrustTier): number {
   if (tier === "human-reviewed") return 3;
   if (tier === "machine-confirmed") return 2;
-  return 1;
+  if (tier === "unverified") return 1;
+  return 0;
 }
 
 function extractSnippet(body: string, terms: string[], description: string | null): string | null {

@@ -927,4 +927,77 @@ title: Remote X
     expect(unconfiguredView.frontmatter?.stale_after).toBeUndefined();
     expect(unconfiguredView.derived?.staleAfter).toBeNull();
   });
+
+  it("initialize moves legacy proposals/ concepts carrying proposal to decisions/", async () => {
+    const { service, dataDir } = await setupService();
+    const repoDir = join(dataDir, "repo");
+    await service.createProject(alice, { project: "demo", title: "Demo", actor: "test/1.0" });
+    const write = (id: string, frontmatter: Record<string, unknown>) =>
+      service.writeConcept(alice, { project: "demo", id, frontmatter, body: "Body.\n", actor: "test/1.0" });
+    const foo = await write("proposals/foo", {
+      type: "Decision",
+      title: "Foo",
+      status: "draft",
+      proposal: { ref: "https://example.com/pr/1" },
+    });
+    await write("decisions/bar", { type: "Decision", title: "Bar" });
+    await write("decisions/bar-proposal", { type: "Decision", title: "Taken" });
+    await write("proposals/bar", {
+      type: "Decision",
+      title: "Old bar",
+      status: "deprecated",
+      proposal: { ref: "https://example.com/pr/2" },
+    });
+    await write("proposals/plain", { type: "Reference", title: "Plain" });
+
+    await service.initialize();
+
+    const moved = await service.readConcept("demo", "decisions/foo");
+    expect(moved.revision).toBe(foo.revision);
+    expect(moved.derived?.trustTier).toBe("proposed");
+    await expect(service.readConcept("demo", "proposals/foo")).rejects.toMatchObject({ code: "not_found" });
+    const oldBar = await service.readConcept("demo", "decisions/bar-proposal-2");
+    expect(oldBar.frontmatter?.title).toBe("Old bar");
+    expect(oldBar.frontmatter?.status).toBe("deprecated");
+    expect((await service.readConcept("demo", "decisions/bar-proposal")).frontmatter?.title).toBe("Taken");
+    expect((await service.readConcept("demo", "proposals/plain")).frontmatter?.title).toBe("Plain");
+    expect(execSync("git log -1 --format=%s", { cwd: repoDir }).toString("utf8").trim()).toBe(
+      "okf: migrate legacy proposals",
+    );
+    expect(await readFile(join(repoDir, "demo", "log.md"), "utf8")).toContain(
+      "**Move**: Moved `proposals/foo` to [Foo](/decisions/foo.md) (by process:ok-fine).",
+    );
+    const proposed = await service.search({ project: "demo", trustTier: "proposed" });
+    expect(proposed.results.map((r) => r.id)).toContain("decisions/foo");
+
+    const head = execSync("git rev-parse HEAD", { cwd: repoDir }).toString("utf8").trim();
+    await service.initialize();
+    expect(execSync("git rev-parse HEAD", { cwd: repoDir }).toString("utf8").trim()).toBe(head);
+  });
+
+  it("sync moves legacy proposals pushed by another writer", async () => {
+    const bareDir = await createTempDir();
+    execSync("git init --bare -b main", { cwd: bareDir });
+    const { service } = await setupService({ GIT_REMOTE_URL: bareDir });
+    await service.createProject(alice, { project: "alpha", title: "Alpha", actor: "test/1.0" });
+
+    const extDir = await createTempDir();
+    execSync(`git clone -b main "${bareDir}" .`, { cwd: extDir });
+    execSync("git config user.name test && git config user.email test@test", { cwd: extDir });
+    execSync("mkdir -p alpha/proposals", { cwd: extDir });
+    await writeFile(
+      join(extDir, "alpha", "proposals", "baz.md"),
+      "---\ntype: Decision\ntitle: Baz\nproposal:\n  ref: https://example.com/pr/3\n---\n\nBaz.\n",
+      "utf8",
+    );
+    execSync('git add alpha && git commit -m "ext: add proposal" && git push origin main', { cwd: extDir });
+
+    await service.syncNow();
+
+    expect(service.catalog.get("alpha", "decisions/baz")?.trustTier).toBe("proposed");
+    expect(service.catalog.get("alpha", "proposals/baz")).toBeUndefined();
+    const remoteFiles = execSync("git ls-tree -r --name-only main", { cwd: bareDir }).toString("utf8").split("\n");
+    expect(remoteFiles).toContain("alpha/decisions/baz.md");
+    expect(remoteFiles).not.toContain("alpha/proposals/baz.md");
+  });
 });

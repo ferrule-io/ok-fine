@@ -33,6 +33,7 @@ function trustDotColor(tier?: string): string {
   const norm = tier?.toLowerCase();
   if (norm === "human-reviewed") return "bg-emerald-500";
   if (norm === "machine-confirmed") return "bg-sky-500";
+  if (norm === "proposed") return "bg-violet-500";
   return "bg-zinc-400 dark:bg-zinc-600";
 }
 

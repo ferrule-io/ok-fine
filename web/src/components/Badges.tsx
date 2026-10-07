@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import { BadgeCheck, CircleDashed, Clock, ShieldCheck } from "lucide-react";
+import { BadgeCheck, CircleDashed, Clock, GitPullRequestDraft, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { TypeIcon } from "./TypeIcon.js";
 
@@ -63,6 +63,15 @@ export function TrustBadge({ tier, className }: TrustBadgeProps) {
       <Pill className={clsx("bg-sky-500/10 text-sky-600 dark:text-sky-400 ring-sky-500/20", className)}>
         <BadgeCheck size={12} className="shrink-0" />
         <span>machine-confirmed</span>
+      </Pill>
+    );
+  }
+
+  if (norm === "proposed") {
+    return (
+      <Pill className={clsx("bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-violet-500/20", className)}>
+        <GitPullRequestDraft size={12} className="shrink-0" />
+        <span>proposed</span>
       </Pill>
     );
   }
