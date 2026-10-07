@@ -14,8 +14,20 @@ export interface Verification {
 const GITHUB_CODE_RE = /^github\.com\/([^/]+)\/([^/]+)\/(.+)$/;
 const GITLAB_CODE_RE = /^gitlab\.com\/([^/]+)\/([^/]+)\/(.+)$/;
 const REPO_RE = /^(github|gitlab)\.com\/[^/]+\/[^/]+$/;
-const HTTP_RE = /^https?:\/\//;
+const HTTP_RE = /^https?:\/\//i;
+const SAFE_COMMIT_RE = /^[a-zA-Z0-9._-]+$/;
 
+function safeHttpUrl(raw: string): string | null {
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+      return parsed.href;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 const KNOWN_FRONTMATTER_KEYS: Record<string, true> = {
   type: true,
   title: true,
@@ -52,28 +64,30 @@ export function readSources(fm: Record<string, unknown> | null): SourceRef[] {
     const id =
       "id" in item && typeof item.id === "string" && item.id.trim().length > 0 ? item.id.trim() : `source-${i + 1}`;
 
-    const commit =
+    const rawCommit =
       "commit" in item && typeof item.commit === "string" && item.commit.trim().length > 0
         ? item.commit.trim()
         : undefined;
+    const commit = rawCommit && SAFE_COMMIT_RE.test(rawCommit) ? rawCommit : undefined;
+    const commitForUrl = commit ?? "HEAD";
 
     let url: string | null = null;
     let label = resource;
 
     if (HTTP_RE.test(resource)) {
-      url = resource;
+      url = safeHttpUrl(resource);
     } else {
       const ghMatch = GITHUB_CODE_RE.exec(resource);
       if (ghMatch?.[1] && ghMatch[2] && ghMatch[3]) {
-        url = `https://github.com/${ghMatch[1]}/${ghMatch[2]}/blob/${commit ?? "HEAD"}/${ghMatch[3]}`;
+        url = safeHttpUrl(`https://github.com/${ghMatch[1]}/${ghMatch[2]}/blob/${commitForUrl}/${ghMatch[3]}`);
         label = ghMatch[3];
       } else {
         const glMatch = GITLAB_CODE_RE.exec(resource);
         if (glMatch?.[1] && glMatch[2] && glMatch[3]) {
-          url = `https://gitlab.com/${glMatch[1]}/${glMatch[2]}/-/blob/${commit ?? "HEAD"}/${glMatch[3]}`;
+          url = safeHttpUrl(`https://gitlab.com/${glMatch[1]}/${glMatch[2]}/-/blob/${commitForUrl}/${glMatch[3]}`);
           label = glMatch[3];
         } else if (REPO_RE.test(resource)) {
-          url = `https://${resource}`;
+          url = safeHttpUrl(`https://${resource}`);
         }
       }
     }

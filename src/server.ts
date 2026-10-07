@@ -215,12 +215,15 @@ export async function startServer(config: Config, options: StartServerOptions = 
       }
       const host = parseHostHeader(req.headers.host);
       if (!host || !allowedHosts[host]) {
-        return reply.code(403).send({
-          error: {
-            code: "forbidden",
-            message: `Host header '${req.headers.host ?? ""}' is not allowed in AUTH_MODE=none`,
-          },
-        });
+        return reply
+          .code(403)
+          .header("x-content-type-options", "nosniff")
+          .send({
+            error: {
+              code: "forbidden",
+              message: `Host header '${req.headers.host ?? ""}' is not allowed in AUTH_MODE=none`,
+            },
+          });
       }
       if (req.headers.origin !== undefined) {
         const rawOrigin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin;
@@ -239,12 +242,15 @@ export async function startServer(config: Config, options: StartServerOptions = 
           }
         }
         if (!originAllowed) {
-          return reply.code(403).send({
-            error: {
-              code: "forbidden",
-              message: `Origin '${rawOrigin ?? ""}' is not allowed in AUTH_MODE=none`,
-            },
-          });
+          return reply
+            .code(403)
+            .header("x-content-type-options", "nosniff")
+            .send({
+              error: {
+                code: "forbidden",
+                message: `Origin '${rawOrigin ?? ""}' is not allowed in AUTH_MODE=none`,
+              },
+            });
         }
       }
     });

@@ -3,6 +3,56 @@ import { Marked, type Token, type Tokens } from "marked";
 import { conceptUrl, fileUrl, resolveHref } from "./links.js";
 import type { SourceRef } from "./sources.js";
 
+const DATA_RASTER_RE = /^data:image\/(?:png|jpe?g|gif|webp|avif|bmp|x-icon);base64,[a-z0-9+/=\s]+$/i;
+
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.nodeName.toUpperCase() === "IMG") {
+    const src = node.getAttribute("src");
+    if (src) {
+      const isDataRaster = DATA_RASTER_RE.test(src);
+      const isSameOrigin = src.startsWith("/") && !src.startsWith("//") && !src.startsWith("/\\");
+      if (!isDataRaster && !isSameOrigin) {
+        node.removeAttribute("src");
+        node.setAttribute("data-okf-blocked-src", "true");
+      }
+    }
+  }
+
+  if (node.nodeName.toUpperCase() === "A") {
+    const href = node.getAttribute("href");
+    if (href) {
+      const resolved = resolveHref(href, "");
+      if (resolved.kind === "invalid") {
+        node.removeAttribute("href");
+      } else if (resolved.kind === "external") {
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer");
+      }
+    }
+  }
+});
+
+export function sanitizeMarkdownHtml(rawHtml: string): string {
+  return DOMPurify.sanitize(rawHtml, {
+    ADD_ATTR: ["target", "data-okf-cite", "data-okf-internal", "data-okf-concept"],
+    FORBID_TAGS: [
+      "style",
+      "form",
+      "input",
+      "button",
+      "iframe",
+      "object",
+      "embed",
+      "script",
+      "foreignobject",
+      "animate",
+      "set",
+      "use",
+    ],
+    FORBID_ATTR: ["style"],
+  });
+}
+
 export interface RenderContext {
   project: string;
   conceptId: string;
@@ -92,7 +142,15 @@ export function renderConceptMarkdown(body: string, ctx: RenderContext): Rendere
 
           const def = footnoteDefs.get(label.toLowerCase());
           if (def?.href) {
-            return `<sup class="okf-cite"><a href="${escapeHtml(def.href)}" target="_blank" rel="noopener noreferrer">${n}</a></sup>`;
+            const resolved = resolveHref(def.href, ctx.conceptId);
+            if (resolved.kind === "external") {
+              return `<sup class="okf-cite"><a href="${escapeHtml(resolved.href)}" target="_blank" rel="noopener noreferrer">${n}</a></sup>`;
+            }
+            if (resolved.kind === "concept") {
+              const url = `/ui${conceptUrl(ctx.project, resolved.id)}${resolved.hash}`;
+              return `<sup class="okf-cite"><a href="${escapeHtml(url)}" data-okf-internal data-okf-concept="${escapeHtml(resolved.id)}">${n}</a></sup>`;
+            }
+            return `<sup class="okf-cite"><span class="okf-cite-missing" title="Invalid source">${n}</span></sup>`;
           }
 
           return `<sup class="okf-cite"><span class="okf-cite-missing" title="Unknown source">${n}</span></sup>`;
@@ -157,7 +215,7 @@ export function renderConceptMarkdown(body: string, ctx: RenderContext): Rendere
         }
 
         if (resolved.kind === "external") {
-          return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer" class="okf-external"${titleAttr}>${text}</a>`;
+          return `<a href="${escapeHtml(resolved.href)}" target="_blank" rel="noopener noreferrer" class="okf-external"${titleAttr}>${text}</a>`;
         }
 
         return `<span class="okf-broken" title="Broken link">${text}</span>`;
@@ -166,16 +224,23 @@ export function renderConceptMarkdown(body: string, ctx: RenderContext): Rendere
         const href = token.href;
         const alt = escapeHtml(token.text);
         const titleAttr = token.title ? ` title="${escapeHtml(token.title)}"` : "";
-        const isExternal =
-          href.startsWith("http://") ||
-          href.startsWith("https://") ||
-          href.startsWith("//") ||
-          href.startsWith("data:");
 
-        if (isExternal) {
+        const isSameOrigin = href.startsWith("/") && !href.startsWith("//") && !href.startsWith("/\\");
+        if (isSameOrigin) {
           return `<img src="${escapeHtml(href)}" alt="${alt}"${titleAttr}>`;
         }
-        return `<span class="okf-image-missing">${alt}</span>`;
+
+        if (DATA_RASTER_RE.test(href)) {
+          return `<img src="${escapeHtml(href)}" alt="${alt}"${titleAttr}>`;
+        }
+
+        const resolved = resolveHref(href, ctx.conceptId);
+        if (resolved.kind === "external") {
+          const label = alt ? `[Image: ${alt}]` : "[Remote image]";
+          return `<span class="okf-image-blocked"><a href="${escapeHtml(resolved.href)}" target="_blank" rel="noopener noreferrer" class="okf-external" title="Remote image blocked to protect IP">${label}</a></span>`;
+        }
+
+        return `<span class="okf-image-missing">${alt || "Image"}</span>`;
       },
     },
   });
@@ -209,11 +274,7 @@ export function renderConceptMarkdown(body: string, ctx: RenderContext): Rendere
     break;
   }
 
-  const html = DOMPurify.sanitize(markedInstance.parser(tokens), {
-    ADD_ATTR: ["target"],
-    FORBID_TAGS: ["style", "form", "input", "button", "iframe", "object", "embed"],
-    FORBID_ATTR: ["style"],
-  });
+  const html = sanitizeMarkdownHtml(markedInstance.parser(tokens));
 
   return { html, headings, citations };
 }

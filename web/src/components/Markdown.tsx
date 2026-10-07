@@ -182,7 +182,9 @@ export function Markdown({ project, concept, onHeadings, onCitations, className 
         if (dest.startsWith("/ui")) {
           dest = dest.slice(3) || "/";
         }
-        navigate(dest);
+        if (dest.startsWith("/") && !dest.startsWith("//") && !dest.startsWith("/\\") && !dest.includes("\\")) {
+          navigate(dest);
+        }
       }
     }
   };

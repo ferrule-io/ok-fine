@@ -113,12 +113,24 @@ export function ProjectPage() {
           {details.repositories && details.repositories.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {details.repositories.map((repo) => {
+                let repoUrl: string | null = null;
+                try {
+                  const parsed = new URL(`https://${repo}`);
+                  if (parsed.protocol === "https:" && parsed.hostname) {
+                    repoUrl = parsed.href;
+                  }
+                } catch {
+                  // Ignore invalid repository URLs
+                }
+                if (!repoUrl) {
+                  return null;
+                }
                 const slashIdx = repo.indexOf("/");
                 const label = slashIdx !== -1 ? repo.slice(slashIdx + 1) : repo;
                 return (
                   <a
                     key={repo}
-                    href={`https://${repo}`}
+                    href={repoUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-1.5 rounded-md border border-border bg-surface-2 px-2 py-1 font-mono text-xs text-muted transition-colors hover:border-border-strong hover:text-fg"
