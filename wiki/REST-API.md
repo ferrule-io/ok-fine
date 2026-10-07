@@ -17,16 +17,20 @@ updates or `If-None-Match: *` for create-only PUTs of concepts and files (other 
 | PUT | `/projects/:project/files/<path>` | write | `text/*` or `application/octet-stream` (UTF-8, no NUL) |
 | DELETE | `/projects/:project/files/<path>` | write | |
 | GET | `/projects/:project/history` | read | `?id=&limit=` |
-| GET | `/projects/:project/lint` | read | |
+| GET | `/projects/:project/lint` | read | includes `unresolved_conflict` warnings |
+| GET | `/projects/:project/conflicts` | read | unresolved conflicts of the project |
+| GET | `/projects/:project/conflicts/:id/files/<path>` | read | `{ preserved, base, current }` of one conflicting file |
+| POST | `/projects/:project/conflicts/:id/resolution` | write | `{ paths, message? }` → 201; `paths` must list every file of the conflict |
 | GET | `/projects/:project/archive` | read | `.tar.gz` export of the committed bundle |
 | PUT | `/projects/:project/archive` | admin | import a `.tar.gz` (single top-level directory); replaces the project |
 | GET | `/search` | read | `q` (max 512 chars), `project`, `type`, `tag` (repeatable), `status`, `trustTier`, `stale`, `limit` |
 | GET | `/sync` | read | remote sync status |
 | POST | `/sync` | admin | sync now |
 
-Errors use one shape: `{ "error": { "code", "message", "details"? } }`. Codes include `invalid_id`,
+Errors use one shape: `{ "error": { "code", "message", "details"? } }`. Codes include `bad_request`, `invalid_id`,
 `invalid_actor`, `forbidden_actor`, `project_not_found`, `not_found`, `already_exists`, `revision_conflict`,
-`upstream_conflict`, `payload_too_large`, `unsupported_media`, and `bundle_not_conformant`.
+`upstream_conflict` (`details.conflicts` names the conflicts that preserved the write), `payload_too_large`,
+`unsupported_media`, and `bundle_not_conformant`.
 
 Unauthenticated endpoints: `GET /healthz` (always unauthenticated). In `oidc` mode, the OAuth discovery routes
 `GET /.well-known/oauth-protected-resource[/mcp]` and `GET /.well-known/oauth-authorization-server` are also

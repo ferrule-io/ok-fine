@@ -18,6 +18,7 @@ import {
 import { renderIndex } from "../okf/index-file.js";
 import { type LintIssue, lintConceptFile } from "../okf/lint.js";
 import {
+  logConflictResolutionEntry,
   logCreationEntry,
   logDeletionEntry,
   logFileDeletionEntry,
@@ -40,6 +41,7 @@ import { isStale, type Status, type TrustTier } from "../okf/semantics.js";
 import { extractBundleArchive } from "../store/archive.js";
 import {
   bundleSource,
+  type Conflict,
   type HistoryEntry,
   type StorageBackend,
   type StorageTx,
@@ -415,7 +417,10 @@ export class KnowledgeService {
       fileExists: (bundlePath: string) => tree.exists(bundlePath),
     };
 
-    const issues = lintConceptFile(`${cleanId}.md`, text, ctx);
+    const issues = [
+      ...lintConceptFile(`${cleanId}.md`, text, ctx),
+      ...(await this.conflictIssues(project, `${cleanId}.md`)),
+    ];
     const split = splitFrontmatter(text);
 
     if (!split) {
@@ -548,7 +553,132 @@ export class KnowledgeService {
     return {
       project,
       conformant: res.conformant,
-      issues: res.issues,
+      issues: [...res.issues, ...(await this.conflictIssues(project))],
+    };
+  }
+
+  /** One warning per file a conflict holds, or per conflict holding no file changes; `path` limits to one file. */
+  private async conflictIssues(project: string, path?: string): Promise<LintIssue[]> {
+    const issues: LintIssue[] = [];
+    for (const c of await this.storage.conflicts(project)) {
+      const hint = `reconcile with read_conflict and write_concept/write_file, then resolve_conflict (id ${c.id})`;
+      if (c.files.length === 0 && path === undefined) {
+        issues.push({
+          severity: "warning",
+          code: "unresolved_conflict",
+          path: "log.md",
+          message: `conflict ${c.id} holds no content changes; ${hint}`,
+        });
+      }
+      for (const f of c.files) {
+        if (path !== undefined && f.path !== path) continue;
+        const merge = f.divergent ? "; the current version also changed, so merge both" : "";
+        issues.push({
+          severity: "warning",
+          code: "unresolved_conflict",
+          path: f.path,
+          message: `conflict ${c.id} preserved an unapplied edit (${f.change})${merge}; ${hint}`,
+        });
+      }
+    }
+    return issues;
+  }
+
+  /** Conflicts outlive their project: a preserved write may be the one that created it. */
+  private async conflictsOf(project: string): Promise<Conflict[]> {
+    if (!PROJECT_RE.test(project)) {
+      throw new OkfError("invalid_id", 400, `invalid project name "${project}"`);
+    }
+    const conflicts = await this.storage.conflicts(project);
+    if (conflicts.length === 0 && (await this.storage.tree(project)).isEmpty) {
+      throw new OkfError("project_not_found", 404, `project "${project}" not found`);
+    }
+    return conflicts;
+  }
+
+  async listConflicts(project: string): Promise<{ project: string; conflicts: Conflict[] }> {
+    return { project, conflicts: await this.conflictsOf(project) };
+  }
+
+  async readConflict(
+    project: string,
+    id: string,
+    path: string,
+  ): Promise<{
+    project: string;
+    id: string;
+    path: string;
+    preserved: string | null;
+    base: string | null;
+    current: { revision: string; content: string } | null;
+  }> {
+    if (!(await this.conflictsOf(project)).some((c) => c.id === id)) {
+      throw new OkfError("not_found", 404, `conflict "${id}" not found in project "${project}"`);
+    }
+    const cleanPath = resolveReadPath(path);
+    const text = (buf: Buffer | null): string | null => {
+      if (buf === null) return null;
+      if (buf.length > this.config.maxFileBytes) {
+        throw new OkfError("payload_too_large", 413, "file exceeds MAX_FILE_BYTES");
+      }
+      if (buf.includes(0)) {
+        throw new OkfError("unsupported_media", 415, "binary files containing NUL bytes are not supported");
+      }
+      return buf.toString("utf8");
+    };
+    const currentBuf = await this.storage.readFile(project, cleanPath);
+    const current = text(currentBuf);
+    return {
+      project,
+      id,
+      path: cleanPath,
+      preserved: text(await this.storage.readConflictFile(project, id, "preserved", cleanPath)),
+      base: text(await this.storage.readConflictFile(project, id, "base", cleanPath)),
+      current:
+        currentBuf === null || current === null ? null : { revision: blobRevision(currentBuf), content: current },
+    };
+  }
+
+  async resolveConflict(
+    p: Principal,
+    args: { project: string; id: string; paths: string[]; actor: string; message?: string },
+  ): Promise<{ project: string; id: string; commit: string | null; pushed: boolean | null; warnings: string[] }> {
+    checkActor(args.actor, p);
+    await this.conflictsOf(args.project);
+
+    const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
+      const conflict = (await this.storage.conflicts(args.project)).find((c) => c.id === args.id);
+      if (!conflict) {
+        throw new OkfError("not_found", 404, `conflict "${args.id}" not found in project "${args.project}"`);
+      }
+      // Resolving discards every preserved file; require each to be named so none is dropped unseen.
+      const acknowledged = new Set(args.paths.map((path) => resolveReadPath(path)));
+      const unacknowledged = conflict.files.map((f) => f.path).filter((path) => !acknowledged.has(path));
+      if (unacknowledged.length > 0) {
+        throw new OkfError("bad_request", 400, "paths must list every file of the conflict", { unacknowledged });
+      }
+      await tx.resolveConflict(args.project, args.id);
+      // A project that exists only inside the conflict gets no log.md; creating one would recreate the project.
+      if ((await this.storage.tree(args.project)).isEmpty) {
+        return { value: null, commit: null };
+      }
+      await this.prependLog(tx, args.project, logConflictResolutionEntry(args.id, args.actor, args.message));
+      return {
+        value: null,
+        commit: {
+          subject: `okf(${args.project}): resolve conflict ${args.id}`,
+          author: args.actor,
+          principal: { subject: p.subject, clientId: p.clientId },
+        },
+      };
+    });
+
+    return {
+      project: args.project,
+      id: args.id,
+      commit: txRes.commit,
+      pushed: txRes.pushed,
+      warnings: txRes.warnings,
     };
   }
 

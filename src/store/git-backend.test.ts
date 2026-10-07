@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Logger, loadConfig, loadStorageConfig } from "../config.js";
+import { OkfError } from "../errors.js";
 import { pathExists } from "./fs-util.js";
 import { GitBackend } from "./git-backend.js";
 
@@ -253,6 +254,139 @@ describe("GitBackend", () => {
     const currentStatus = await storage.syncStatus();
     expect(currentStatus.lastError).toMatch(/remote history was rewritten; syncing halted/i);
 
+    await storage.close();
+  });
+
+  it("rejected push with a conflicting rebase keeps this write and earlier unpushed commits as per-project conflicts", async () => {
+    const bare = join(dataDir, "remote.git");
+    execFileSync("git", ["init", "--bare", "-b", "main", bare]);
+    const ext = join(dataDir, "ext");
+    execFileSync("git", ["clone", bare, ext]);
+    execFileSync("git", ["checkout", "-b", "main"], { cwd: ext });
+    execFileSync("git", ["config", "user.name", "test"], { cwd: ext });
+    execFileSync("git", ["config", "user.email", "test@test"], { cwd: ext });
+    await mkdir(join(ext, "alpha"));
+    await mkdir(join(ext, "beta"));
+    await writeFile(join(ext, "alpha", "a.md"), "# A\n");
+    await writeFile(join(ext, "beta", "b.md"), "# B\n");
+    execFileSync("git", ["add", "-A"], { cwd: ext });
+    execFileSync("git", ["commit", "-m", "initial"], { cwd: ext });
+    execFileSync("git", ["push", "origin", "main"], { cwd: ext });
+
+    const config = loadStorageConfig({
+      DATA_DIR: join(dataDir, "storage-data"),
+      GIT_REMOTE_URL: bare,
+      LOG_LEVEL: "silent",
+    });
+    let storage = await GitBackend.open(config, log);
+
+    // An accepted but unpushed write in another project.
+    execFileSync("git", ["remote", "set-url", "--push", "origin", "/nonexistent/repo.git"], { cwd: storage.repoDir });
+    const unpushed = await storage.transaction({ projects: ["beta"] }, async (tx) => {
+      await tx.writeFile("beta", "b.md", "# Local B\n");
+      return { value: null, commit };
+    });
+    expect(unpushed.pushed).toBe(false);
+    execFileSync("git", ["config", "--unset", "remote.origin.pushurl"], { cwd: storage.repoDir });
+
+    // The upstream edit lands after this transaction's fetch, so the push is rejected and the rebase conflicts.
+    const err = await storage
+      .transaction({ projects: ["alpha"] }, async (tx) => {
+        await tx.writeFile("alpha", "a.md", "# Local A\n");
+        execFileSync("git", ["pull", "-q", "--rebase", "origin", "main"], { cwd: ext });
+        await writeFile(join(ext, "alpha", "a.md"), "# Remote A\n");
+        execFileSync("git", ["commit", "-am", "remote edit"], { cwd: ext });
+        execFileSync("git", ["push", "origin", "main"], { cwd: ext });
+        return { value: null, commit };
+      })
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OkfError);
+    expect(err).toMatchObject({ code: "upstream_conflict", status: 409 });
+    const id = (await storage.conflicts("alpha"))[0]?.id ?? "";
+    expect(id).toMatch(/^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{12}$/);
+    expect(err instanceof OkfError ? err.details : null).toEqual({
+      conflicts: [
+        { project: "alpha", id },
+        { project: "beta", id },
+      ],
+    });
+
+    // Current state is the remote's; nothing local survives outside the conflicts.
+    expect((await storage.readFile("alpha", "a.md"))?.toString("utf8")).toBe("# Remote A\n");
+    expect((await storage.readFile("beta", "b.md"))?.toString("utf8")).toBe("# B\n");
+    expect((await storage.conflicts("alpha")).map((c) => c.files)).toEqual([
+      [{ path: "a.md", change: "modified", divergent: true }],
+    ]);
+    expect((await storage.conflicts("beta")).map((c) => c.files)).toEqual([
+      [{ path: "b.md", change: "modified", divergent: false }],
+    ]);
+    expect((await storage.readConflictFile("alpha", id, "preserved", "a.md"))?.toString("utf8")).toBe("# Local A\n");
+    expect((await storage.readConflictFile("alpha", id, "base", "a.md"))?.toString("utf8")).toBe("# A\n");
+    expect((await storage.readConflictFile("beta", id, "preserved", "b.md"))?.toString("utf8")).toBe("# Local B\n");
+    const remoteRefs = () =>
+      execFileSync("git", ["--git-dir", bare, "for-each-ref", "--format=%(refname)", "refs/heads/ok-fine/"])
+        .toString("utf8")
+        .trim()
+        .split("\n")
+        .filter(Boolean);
+    expect(remoteRefs()).toEqual([`refs/heads/ok-fine/conflict/alpha/${id}`, `refs/heads/ok-fine/conflict/beta/${id}`]);
+
+    // Resolving beta leaves alpha's part, which shares the same commit, intact locally and on the remote.
+    await storage.transaction({ projects: ["beta"] }, async (tx) => {
+      await tx.resolveConflict("beta", id);
+      return { value: null, commit: null };
+    });
+    expect(await storage.conflicts("beta")).toEqual([]);
+    expect(remoteRefs()).toEqual([`refs/heads/ok-fine/conflict/alpha/${id}`]);
+
+    // A resolution inside a failed transaction is not applied.
+    await expect(
+      storage.transaction({ projects: ["alpha"] }, async (tx) => {
+        await tx.resolveConflict("alpha", id);
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+
+    await storage.close();
+    storage = await GitBackend.open(config, log);
+    expect((await storage.conflicts("alpha")).map((c) => c.id)).toEqual([id]);
+    expect((await storage.readConflictFile("alpha", id, "preserved", "a.md"))?.toString("utf8")).toBe("# Local A\n");
+    await storage.close();
+  });
+
+  it("splits a legacy single-branch conflict into per-project conflicts on open", async () => {
+    const first = await open();
+    for (const project of ["alpha", "beta"]) {
+      await first.storage.transaction({ projects: [project] }, async (tx) => {
+        await tx.writeFile(project, "x.md", "# Base\n");
+        return { value: null, commit };
+      });
+    }
+    const base = execSync("git rev-parse HEAD", { cwd: first.storage.repoDir }).toString("utf8").trim();
+    for (const project of ["alpha", "beta"]) {
+      await first.storage.transaction({ projects: [project] }, async (tx) => {
+        await tx.writeFile(project, "x.md", "# Stranded\n");
+        return { value: null, commit };
+      });
+    }
+    const tip = execSync("git rev-parse HEAD", { cwd: first.storage.repoDir }).toString("utf8").trim();
+    execSync(`git branch ok-fine/conflict-20260101T000000Z ${tip} && git reset -q --hard ${base}`, {
+      cwd: first.storage.repoDir,
+    });
+    await first.storage.close();
+
+    const { storage } = await open();
+    const id = `20260101T000000Z-${tip.slice(0, 12)}`;
+    for (const project of ["alpha", "beta"]) {
+      const [conflict] = await storage.conflicts(project);
+      expect(conflict).toMatchObject({
+        id,
+        detectedAt: "2026-01-01T00:00:00Z",
+        files: [{ path: "x.md", change: "modified", divergent: false }],
+      });
+      expect((await storage.readConflictFile(project, id, "preserved", "x.md"))?.toString("utf8")).toBe("# Stranded\n");
+    }
+    expect(execSync("git branch --list 'ok-fine/conflict-*'", { cwd: storage.repoDir }).toString("utf8")).toBe("");
     await storage.close();
   });
 

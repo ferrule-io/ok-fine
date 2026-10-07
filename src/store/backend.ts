@@ -32,6 +32,33 @@ export interface TransactionResult<T> {
   warnings: string[];
 }
 
+/**
+ * Content a backend accepted but could not reconcile with the authoritative copy. Backends never discard accepted
+ * content: they keep it as one conflict per affected project until a client resolves it.
+ */
+export interface Conflict {
+  /** Opaque, backend-assigned, unique within the project. */
+  id: string;
+  /** ISO 8601. */
+  detectedAt: string;
+  /** Changes to non-generated files (index.md files and the root log.md are omitted). */
+  files: ConflictFile[];
+  /** Writes the preserved side holds for this project, newest first. */
+  commits: HistoryEntry[];
+}
+
+export interface ConflictFile {
+  /** Bundle-relative path. */
+  path: string;
+  /** What the preserved side did to the file, relative to the common base. */
+  change: "added" | "modified" | "deleted";
+  /** The current content also changed since the common base, so applying the preserved side needs a merge. */
+  divergent: boolean;
+}
+
+/** `preserved`: the content the backend could not apply. `base`: the common ancestor of preserved and current. */
+export type ConflictSide = "preserved" | "base";
+
 /** Read-only view of one bundle. Paths are bundle-relative POSIX paths without dot segments. */
 export interface BundleSource {
   readonly paths: readonly string[];
@@ -45,6 +72,8 @@ export interface StorageTx {
   deleteFile(project: string, path: string): Promise<void>;
   deleteProject(project: string): Promise<void>;
   replaceProject(project: string, source: BundleSource): Promise<void>;
+  /** Discards the conflict's preserved copy; takes effect only if the transaction completes without throwing. */
+  resolveConflict(project: string, id: string): Promise<void>;
 }
 
 /**
@@ -69,6 +98,10 @@ export interface StorageBackend {
   archive(project: string): Readable;
   sync(): Promise<SyncStatus>;
   syncStatus(): Promise<SyncStatus>;
+  /** Unresolved conflicts touching `project`, oldest first. Never locks. */
+  conflicts(project: string): Promise<Conflict[]>;
+  /** One side of a conflicting file; null when the conflict is unknown or the file is absent on that side. */
+  readConflictFile(project: string, id: string, side: ConflictSide, path: string): Promise<Buffer | null>;
   /** Waits for in-flight transactions. */
   close(): Promise<void>;
 }

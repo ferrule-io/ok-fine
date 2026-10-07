@@ -27,12 +27,22 @@ With `GIT_REMOTE_URL` set, ok-fine:
 
 On a rebase conflict, ok-fine does not discard local work:
 
-1. It moves the local commits to a branch `ok-fine/conflict-<timestamp>` and pushes that branch to the remote.
+1. It keeps the local commits as one conflict per project they touch: a branch
+   `ok-fine/conflict/<project>/<id>` per project, all pointing at the same commit, pushed to the remote when
+   possible. `<id>` is `<UTC timestamp with milliseconds>-<12 hex of the commit>`.
 2. It resets to the remote branch.
-3. It reports the conflict in `GET /api/v1/sync` → `lastError`.
+3. It reports the conflict in `GET /api/v1/sync` → `lastError`, and agents see it as an `unresolved_conflict`
+   lint issue in the affected project only.
 
-If a write conflicts with a concurrent upstream edit during push, the write fails with `upstream_conflict`;
-re-read and retry.
+This happens during sync, before a write (the write then proceeds on the remote state), and when a write's push is
+rejected and its rebase conflicts. In the last case the write fails with `upstream_conflict`; the write itself and
+any earlier unpushed writes are in the conflict (`details.conflicts`).
+
+Resolving a conflict (`resolve_conflict`) deletes only that project's branch, locally and on the remote; the commit
+stays reachable while another project's branch still points at it. If the remote deletion fails, ok-fine retries it
+on the next sync. See [MCP tools](https://github.com/ferrule-io/ok-fine/wiki/MCP-Tools#conflicts) for the agent
+workflow. On start, ok-fine splits older `ok-fine/conflict-<timestamp>` branches into per-project conflicts; their
+remote copies are left in place.
 
 If the remote's history is rewritten (such as following a force-push), sync halts immediately — ok-fine will not rebase, push, or push a conflict branch. The sync status `lastError` (in `GET /api/v1/sync`) reports that the remote history was rewritten.
 
