@@ -608,15 +608,15 @@ title: Remote X
     execSync('git commit -m "ext: conflicting concept-x"', { cwd: extDir });
     execSync("git push origin main", { cwd: extDir });
 
-    // Sync now should fail rebase, push ok-fine/conflict-*, and reset to origin/main
+    // Sync now should fail rebase, push the per-project conflict branch, and reset to origin/main
     const syncStatus = await service.syncNow();
-    expect(syncStatus.lastError).toMatch(/^rebase conflict; local commits preserved on ok-fine\/conflict-/);
+    expect(syncStatus.lastError).toMatch(/^rebase conflict; local commits preserved as conflict \S+ in alpha$/);
 
     // Remote conflict branch holds the original local commit with the local content
     const branch = execSync("git for-each-ref --format='%(refname:short)' refs/heads/ok-fine/", { cwd: bareDir })
       .toString("utf8")
       .trim();
-    expect(branch).toMatch(/^ok-fine\/conflict-\d{8}T\d{6}Z$/);
+    expect(branch).toMatch(/^ok-fine\/conflict\/alpha\/\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{12}$/);
     const preserved = execSync(`git show ${branch}:alpha/concept-x.md`, { cwd: bareDir }).toString("utf8");
     expect(preserved).toContain("title: Local X");
     expect(execSync(`git log -1 --format=%an ${branch}`, { cwd: bareDir }).toString("utf8").trim()).toBe("agent/1.0");
@@ -628,6 +628,68 @@ title: Remote X
     const afterSync = await service.readConcept("alpha", "concept-x");
     expect(afterSync.derived?.title).toBe("Remote X");
     expect((await service.search({ query: "Remote" })).results.map((r) => r.id)).toContain("concept-x");
+
+    // The conflict surfaces in lint and on the concept, scoped to its project
+    const conflictId = branch.split("/").pop() ?? "";
+    const conflictIssue = {
+      severity: "warning",
+      code: "unresolved_conflict",
+      path: "concept-x.md",
+      message: expect.stringContaining(conflictId),
+    };
+    expect((await service.lint("alpha")).issues).toContainEqual(conflictIssue);
+    expect(afterSync.issues).toContainEqual(conflictIssue);
+    const listed = await service.listConflicts("alpha");
+    expect(listed.conflicts.map((c) => [c.id, c.files, c.commits.map((h) => h.actor)])).toEqual([
+      [conflictId, [{ path: "concept-x.md", change: "added", divergent: true }], ["agent/1.0"]],
+    ]);
+    await service.createProject(alice, { project: "beta", title: "Beta", actor: "human:alice" });
+    expect((await service.listConflicts("beta")).conflicts).toEqual([]);
+    expect((await service.lint("beta")).issues.map((i) => i.code)).not.toContain("unresolved_conflict");
+
+    const sides = await service.readConflict("alpha", conflictId, "concept-x.md");
+    expect(sides.preserved).toContain("title: Local X");
+    expect(sides.base).toBeNull();
+    expect(sides.current?.content).toContain("title: Remote X");
+    expect(sides.current?.revision).toBe(afterSync.revision);
+    await expect(service.readConflict("alpha", "20260101T000000Z-000000000000", "concept-x.md")).rejects.toMatchObject({
+      code: "not_found",
+    });
+
+    // Merge, then resolve: every file must be acknowledged
+    await service.writeConcept(alice, {
+      project: "alpha",
+      id: "concept-x",
+      frontmatter: { type: "Note", title: "Merged X" },
+      body: "Local content\n\n# Remote conflicting content",
+      actor: "agent/1.0",
+      expectedRevision: sides.current?.revision ?? null,
+    });
+    await expect(
+      service.resolveConflict(alice, { project: "alpha", id: conflictId, paths: [], actor: "agent/1.0" }),
+    ).rejects.toMatchObject({ code: "bad_request", details: { unacknowledged: ["concept-x.md"] } });
+    expect((await service.listConflicts("alpha")).conflicts).toHaveLength(1);
+
+    const resolved = await service.resolveConflict(alice, {
+      project: "alpha",
+      id: conflictId,
+      paths: ["concept-x.md"],
+      actor: "agent/1.0",
+      message: "kept both bodies",
+    });
+    expect(resolved.pushed).toBe(true);
+    expect((await service.listConflicts("alpha")).conflicts).toEqual([]);
+    expect((await service.readConcept("alpha", "concept-x")).issues.map((i) => i.code)).not.toContain(
+      "unresolved_conflict",
+    );
+    expect(execSync("git for-each-ref refs/heads/ok-fine/", { cwd: bareDir }).toString("utf8")).toBe("");
+    expect(execSync("git for-each-ref refs/ok-fine/resolved/", { cwd: storage.repoDir }).toString("utf8")).toBe("");
+    expect((await service.readFile("alpha", "log.md")).content).toContain(
+      `**Conflict resolution**: Resolved conflict \`${conflictId}\` (by agent/1.0). kept both bodies`,
+    );
+    await expect(
+      service.resolveConflict(alice, { project: "alpha", id: conflictId, paths: [], actor: "agent/1.0" }),
+    ).rejects.toMatchObject({ code: "not_found" });
   });
 
   it("archive: export -> import roundtrips concepts, rejects invalid archives without modifying state", async () => {

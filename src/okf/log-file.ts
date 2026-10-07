@@ -50,6 +50,10 @@ export function logImportEntry(actor: string, message?: string): string {
   return appendMessage(`**Import**: Imported bundle archive (by ${actor}).`, message);
 }
 
+export function logConflictResolutionEntry(id: string, actor: string, message?: string): string {
+  return appendMessage(`**Conflict resolution**: Resolved conflict \`${id}\` (by ${actor}).`, message);
+}
+
 export function prependLogEntry(
   existing: string | null,
   date: string, // YYYY-MM-DD UTC

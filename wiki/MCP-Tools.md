@@ -4,11 +4,13 @@ A client only sees the tools its token's scopes allow. Over stdio, every tool is
 |---|---|---|
 | `list_projects` | read | Projects with counts and bound git repositories; `repository` filters to one codebase |
 | `get_index` | read | Directory listing: concepts by type, files, subdirectories |
-| `read_concept` | read | Frontmatter, body, derived trust/staleness, links, lint issues, `revision` |
+| `read_concept` | read | Frontmatter, body, derived trust/staleness, links, lint issues (including `unresolved_conflict`), `revision` |
 | `search_concepts` | read | Keyword search (`query` max 512 chars) with filters (`project`, `type`, `tags`, `status`, `trustTier`, `stale`) |
 | `get_history` | read | Git history of a concept or project |
 | `read_file` | read | Any text file verbatim (including `index.md`, `log.md`, assets) |
-| `lint_project` | read | OKF conformance report |
+| `lint_project` | read | OKF conformance report, plus an `unresolved_conflict` warning per file of each unresolved conflict |
+| `list_conflicts` | read | The project's unresolved conflicts: id, changed files (`change`, `divergent`), and the commits that made them |
+| `read_conflict` | read | One file of a conflict: `preserved`, `base`, and `current` (with `revision`); null = absent on that side |
 | `submit_feedback` | read | Prefilled public GitHub issue link for feedback about ok-fine; the user submits it |
 | `create_project` | write | New bundle with `overview.md`, `log.md`, `index.md` |
 | `write_concept` | write | Create or replace a concept (whole frontmatter and body) |
@@ -16,6 +18,7 @@ A client only sees the tools its token's scopes allow. Over stdio, every tool is
 | `delete_concept` | write | Remove a concept |
 | `write_file` | write | Create or replace a non-markdown asset |
 | `delete_file` | write | Remove an asset |
+| `resolve_conflict` | write | Discard this project's part of a conflict after merging; `paths` must list every file of the conflict |
 | `delete_project` | admin | Remove a whole bundle (`confirm` must repeat the name) |
 | `sync_now` | admin | Fetch, rebase, and push to the git remote now |
 
@@ -30,3 +33,16 @@ A client only sees the tools its token's scopes allow. Over stdio, every tool is
   accepted by `write_concept`, `write_file`, `verify_concept`, `delete_concept`, and `delete_file`
 - `null`: create-only, the target must not exist yet (`already_exists` otherwise); accepted by `write_concept`
   and `write_file` only
+
+# Conflicts
+
+Writes reach a concept through one server in order, so two sessions on the same server never conflict in git;
+`expectedRevision` catches the overlap (only when the client passes it). Separate ok-fine instances sharing a git
+remote can: when ok-fine cannot rebase its accepted writes onto the remote, it keeps them as a conflict for each
+project they touch (see [Git storage](https://github.com/ferrule-io/ok-fine/wiki/Git-Storage-and-Remote-Sync)).
+
+1. `lint_project`, or `read_concept` on an affected concept, reports `unresolved_conflict` with the conflict id.
+2. `read_conflict` returns the `preserved` write, the common `base`, and the `current` content with its `revision`.
+3. Write the merge with `write_concept`/`write_file` and `expectedRevision` set to that `revision`.
+4. `resolve_conflict` with every file path of the conflict in `paths`. It fails with `bad_request`
+   (`details.unacknowledged`) when a file is missing, and with `not_found` when the conflict was already resolved.

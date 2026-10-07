@@ -54,8 +54,10 @@ Break any of these and you have a bug.
     it must never call `transaction()` (that deadlocks).
   - Reads never lock. File/dir existence and listings come from the in-memory path index (`PathIndex`), which
     every `StorageTx` write/delete updates and every resync rebuilds; never bypass `StorageTx` to touch the repo.
-- **Never lose local commits:** on rebase conflict, `preserveConflict()` keeps them on `ok-fine/conflict-<stamp>`
-  (local branch, plus remote when the push succeeds) before resetting.
+- **Never lose accepted writes:** a backend that cannot reconcile accepted content keeps it as a `Conflict` per
+  project (`StorageBackend.conflicts`) until `StorageTx.resolveConflict`. In `GitBackend`, every failed rebase goes
+  through `preserveConflict()`, which creates `ok-fine/conflict/<project>/<id>` refs (local, plus remote when the
+  push succeeds) before resetting; never `reset --hard` past unpushed commits any other way.
 - **Path safety:**
   - Project names must match `PROJECT_RE` before any path join (`assertProjectExists`).
   - Concept IDs for writes go through `normalizeConceptIdForWrite`, file paths through `normalizeFilePathForWrite`,

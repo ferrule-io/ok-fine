@@ -9,6 +9,9 @@ import { parseActor } from "../okf/semantics.js";
 import type {
   BundleSource,
   CommitSpec,
+  Conflict,
+  ConflictFile,
+  ConflictSide,
   HistoryEntry,
   ResyncHandler,
   StorageBackend,
@@ -25,6 +28,51 @@ import { PathIndex } from "./path-index.js";
 const REMOTE_BASE_REF = "refs/ok-fine/remote-base";
 const REMOTE_REWRITTEN_MSG =
   "remote history was rewritten; syncing halted. Stop ok-fine, remove DATA_DIR/repo, and restart to re-clone";
+
+// One ref per (project, conflict): refs/heads/ok-fine/conflict/<project>/<id>. The commit stays reachable while
+// any project's ref remains, so resolving one project never drops another project's preserved writes.
+const CONFLICT_REF_PREFIX = "refs/heads/ok-fine/conflict/";
+// Pre-split format: one branch for all projects. Migrated to per-project refs on open.
+const LEGACY_CONFLICT_REF_PREFIX = "refs/heads/ok-fine/conflict-";
+// Resolved conflicts whose remote branch still has to be deleted.
+const RESOLVED_REF_PREFIX = "refs/ok-fine/resolved/";
+// Holds preserved commits that touch no project directory, so they stay reachable.
+const REPOSITORY_CONFLICT_SCOPE = "_repository";
+/** `<UTC stamp>-<12 hex of the preserved tip>`; legacy stamps have no milliseconds. */
+const CONFLICT_ID_RE = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\.\d{3})?Z-[0-9a-f]{12}$/;
+const HISTORY_FORMAT = "--format=%H%x1f%aI%x1f%an%x1f%s%x1f%(trailers:key=Okf-Principal,valueonly)%x1e";
+
+function conflictRef(project: string, id: string): string {
+  return `${CONFLICT_REF_PREFIX}${project}/${id}`;
+}
+
+function conflictDetectedAt(id: string): string {
+  const m = CONFLICT_ID_RE.exec(id);
+  if (!m) return "";
+  return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7] ?? ""}Z`;
+}
+
+/** Server-generated files: rebuilt after every sync, so a conflict on them never needs a client merge. */
+function isGeneratedPath(path: string): boolean {
+  return path === "log.md" || path === "index.md" || path.endsWith("/index.md");
+}
+
+function parseHistory(stdout: string): HistoryEntry[] {
+  const commits: HistoryEntry[] = [];
+  for (const entry of stdout.split("\x1e")) {
+    if (entry.trim().length === 0) continue;
+    const parts = entry.trim().split("\x1f");
+    const principalRaw = parts[4]?.trim();
+    commits.push({
+      sha: parts[0] ?? "",
+      at: parts[1] ?? "",
+      actor: parts[2] ?? "",
+      subject: parts[3] ?? "",
+      principal: principalRaw && principalRaw.length > 0 ? principalRaw : null,
+    });
+  }
+  return commits;
+}
 
 function extractChangedProjects(diffOutput: string): string[] {
   const lines = diffOutput
@@ -44,6 +92,8 @@ function extractChangedProjects(diffOutput: string): string[] {
 /** Mutations against the working tree; keeps the path index in step with disk. */
 class GitTx implements StorageTx {
   touched = false;
+  /** Applied by GitBackend.transaction only after the transaction succeeds. */
+  readonly resolutions: Array<{ project: string; id: string }> = [];
 
   constructor(
     private readonly repoDir: string,
@@ -122,6 +172,12 @@ class GitTx implements StorageTx {
     this.index.setProject(project, written);
     this.touched = true;
   }
+
+  async resolveConflict(project: string, id: string): Promise<void> {
+    if (!this.resolutions.some((r) => r.project === project && r.id === id)) {
+      this.resolutions.push({ project, id });
+    }
+  }
 }
 
 export class GitBackend implements StorageBackend {
@@ -136,6 +192,8 @@ export class GitBackend implements StorageBackend {
   private resyncHandler: ResyncHandler | null = null;
   private lastSyncAt: string | null = null;
   private lastError: string | null = null;
+  /** project -> conflict id -> preserved tip. Only this class creates or deletes conflict refs. */
+  private readonly conflictRefs = new Map<string, Map<string, string>>();
 
   constructor(config: StorageConfig, log: Logger, repoDir: string, homeDir: string) {
     this.config = config;
@@ -338,6 +396,8 @@ export class GitBackend implements StorageBackend {
       }
     }
 
+    await repo.migrateLegacyConflicts();
+    await repo.loadConflictRefs();
     await repo.reindexAll();
     return repo;
   }
@@ -472,35 +532,184 @@ export class GitBackend implements StorageBackend {
     return rev.stdout.trim();
   }
 
-  /**
-   * Aborts a failed rebase, keeps the original local commits on `ok-fine/conflict-<stamp>` (always as a
-   * local branch, plus on the remote when the push succeeds), then resets to the remote branch.
-   * Returns a human-readable description of where the commits were preserved.
-   */
-  private async preserveConflict(): Promise<string> {
-    await this.git.run(["rebase", "--abort"], { allowFail: true });
-    const stamp = new Date()
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace(/\.\d{3}/, "")
-      .replace(/Z$/, "Z");
-    const conflictBranch = `ok-fine/conflict-${stamp}`;
+  private async mergeBase(a: string, b: string): Promise<string | null> {
+    const res = await this.git.run(["merge-base", a, b], { allowFail: true });
+    return res.code === 0 ? res.stdout.trim() : null;
+  }
 
-    // The local branch keeps the commits reachable on the PVC even if the remote push fails.
-    await this.git.run(["branch", "-f", conflictBranch, "HEAD"]);
+  /** Projects whose directories `tip` changed since its merge-base with `against`. */
+  private async projectsChangedSince(tip: string, against: string): Promise<string[]> {
+    const base = await this.mergeBase(tip, against);
+    const res = base
+      ? await this.git.run(["diff", "--name-only", "--no-renames", "-z", base, tip])
+      : await this.git.run(["ls-tree", "-r", "--name-only", "-z", tip]);
+    const projects = new Set<string>();
+    for (const path of res.stdout.split("\0")) {
+      const slash = path.indexOf("/");
+      if (slash > 0 && PROJECT_RE.test(path.slice(0, slash))) projects.add(path.slice(0, slash));
+    }
+    return [...projects].sort();
+  }
+
+  /**
+   * Aborts a failed rebase and keeps HEAD as one conflict per touched project (local refs, plus remote branches
+   * when the push succeeds), then resets to the remote branch. Never overwrites an existing conflict.
+   */
+  private async preserveConflict(): Promise<{ message: string; conflicts: Array<{ project: string; id: string }> }> {
+    await this.git.run(["rebase", "--abort"], { allowFail: true });
+    const upstream = `origin/${this.config.gitBranch}`;
+    const tip = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
+    const projects = await this.projectsChangedSince(tip, upstream);
+    if (projects.length === 0) projects.push(REPOSITORY_CONFLICT_SCOPE);
+
+    // Millisecond stamp plus tip prefix; update-ref with an empty old value fails rather than overwrite.
+    const id = `${new Date().toISOString().replace(/[-:]/g, "")}-${tip.slice(0, 12)}`;
+    const conflicts = projects.map((project) => ({ project, id }));
+    for (const { project } of conflicts) {
+      await this.git.run(["update-ref", conflictRef(project, id), tip, ""]);
+      let byId = this.conflictRefs.get(project);
+      if (!byId) {
+        byId = new Map();
+        this.conflictRefs.set(project, byId);
+      }
+      byId.set(id, tip);
+    }
     const pushRes = await this.git.run(
-      ["push", "origin", `refs/heads/${conflictBranch}:refs/heads/${conflictBranch}`],
+      ["push", "origin", ...conflicts.map(({ project }) => `${conflictRef(project, id)}:${conflictRef(project, id)}`)],
       { allowFail: true },
     );
-    await this.git.run(["reset", "--hard", `origin/${this.config.gitBranch}`]);
+    await this.git.run(["reset", "--hard", upstream]);
 
-    let message = `local commits preserved on ${conflictBranch}`;
+    let message = `local commits preserved as conflict ${id} in ${projects.join(", ")}`;
     if (pushRes.code !== 0) {
       const reason = pushRes.stderr.trim().split("\n")[0] ?? "";
-      message += ` (local branch only; pushing it failed: ${reason})`;
+      message += ` (kept locally only; pushing the conflict branches failed: ${reason})`;
     }
     this.log.error({ stderr: pushRes.code !== 0 ? pushRes.stderr : undefined }, `rebase conflict; ${message}`);
-    return message;
+    return { message, conflicts };
+  }
+
+  /** Splits single-branch `ok-fine/conflict-<stamp>` conflicts into per-project refs. Remote copies are kept. */
+  private async migrateLegacyConflicts(): Promise<void> {
+    const res = await this.git.run([
+      "for-each-ref",
+      "--format=%(objectname) %(refname)",
+      `${LEGACY_CONFLICT_REF_PREFIX}*`,
+    ]);
+    for (const line of res.stdout.split("\n")) {
+      const [tip, ref] = line.split(" ");
+      if (!tip || !ref) continue;
+      const id = `${ref.slice(LEGACY_CONFLICT_REF_PREFIX.length)}-${tip.slice(0, 12)}`;
+      if (!CONFLICT_ID_RE.test(id)) {
+        this.log.warn({ ref }, "leaving unrecognized legacy conflict branch in place");
+        continue;
+      }
+      const projects = await this.projectsChangedSince(tip, "HEAD");
+      if (projects.length === 0) projects.push(REPOSITORY_CONFLICT_SCOPE);
+      for (const project of projects) {
+        const target = conflictRef(project, id);
+        const exists = await this.git.run(["rev-parse", "--verify", "--quiet", target], { allowFail: true });
+        if (exists.code !== 0) await this.git.run(["update-ref", target, tip, ""]);
+      }
+      await this.git.run(["update-ref", "-d", ref, tip]);
+    }
+  }
+
+  private async loadConflictRefs(): Promise<void> {
+    this.conflictRefs.clear();
+    const res = await this.git.run(["for-each-ref", "--format=%(objectname) %(refname)", CONFLICT_REF_PREFIX]);
+    for (const line of res.stdout.split("\n")) {
+      const [tip, ref] = line.split(" ");
+      if (!tip || !ref) continue;
+      const [project, id, ...rest] = ref.slice(CONFLICT_REF_PREFIX.length).split("/");
+      if (!project || !id || rest.length > 0 || !CONFLICT_ID_RE.test(id)) continue;
+      let byId = this.conflictRefs.get(project);
+      if (!byId) {
+        byId = new Map();
+        this.conflictRefs.set(project, byId);
+      }
+      byId.set(id, tip);
+    }
+  }
+
+  /** Drops resolved conflicts locally; with a remote, keeps a marker until the remote branch is deleted too. */
+  private async applyResolutions(resolutions: Array<{ project: string; id: string }>): Promise<void> {
+    for (const { project, id } of resolutions) {
+      const byId = this.conflictRefs.get(project);
+      const tip = byId?.get(id);
+      if (!byId || !tip) continue;
+      if (this.hasRemote) await this.git.run(["update-ref", `${RESOLVED_REF_PREFIX}${project}/${id}`, tip]);
+      await this.git.run(["update-ref", "-d", conflictRef(project, id), tip]);
+      byId.delete(id);
+    }
+  }
+
+  /** Deletes remote branches of resolved conflicts; returns one message per deletion still pending. */
+  private async pushResolutions(): Promise<string[]> {
+    const res = await this.git.run(["for-each-ref", "--format=%(refname)", RESOLVED_REF_PREFIX]);
+    const pending: string[] = [];
+    for (const marker of res.stdout.split("\n")) {
+      if (!marker) continue;
+      const name = marker.slice(RESOLVED_REF_PREFIX.length);
+      const del = await this.git.run(["push", "origin", `:${CONFLICT_REF_PREFIX}${name}`], { allowFail: true });
+      // Never pushed (the preserving push failed) counts as deleted.
+      if (del.code === 0 || del.stderr.includes("remote ref does not exist")) {
+        await this.git.run(["update-ref", "-d", marker]);
+      } else {
+        const reason = del.stderr.trim().split("\n")[0] ?? "";
+        pending.push(
+          `conflict ${name} resolved; deleting its remote branch failed, will retry on next sync: ${reason}`,
+        );
+      }
+    }
+    return pending;
+  }
+
+  async conflicts(project: string): Promise<Conflict[]> {
+    const byId = this.conflictRefs.get(project);
+    if (!byId || byId.size === 0) return [];
+    const scope = `${project}/`;
+    const out: Conflict[] = [];
+    for (const id of [...byId.keys()].sort()) {
+      const tip = byId.get(id);
+      if (!tip) continue;
+      const base = await this.mergeBase(tip, "HEAD");
+      const files: ConflictFile[] = [];
+      if (base) {
+        const current = await this.git.run(["diff", "--name-only", "--no-renames", "-z", base, "HEAD", "--", scope]);
+        const changedHere = new Set(current.stdout.split("\0"));
+        const preserved = await this.git.run(["diff", "--name-status", "--no-renames", "-z", base, tip, "--", scope]);
+        // -z name-status output alternates status and path.
+        const fields = preserved.stdout.split("\0");
+        for (let i = 0; i + 1 < fields.length; i += 2) {
+          const status = fields[i] ?? "";
+          const full = fields[i + 1] ?? "";
+          const path = full.slice(scope.length);
+          if (isGeneratedPath(path)) continue;
+          const change = status === "A" ? "added" : status === "D" ? "deleted" : "modified";
+          files.push({ path, change, divergent: changedHere.has(full) });
+        }
+      } else {
+        const listed = await this.git.run(["ls-tree", "-r", "--name-only", "-z", tip, "--", scope]);
+        for (const full of listed.stdout.split("\0")) {
+          const path = full.slice(scope.length);
+          if (full.length === 0 || isGeneratedPath(path)) continue;
+          files.push({ path, change: "added", divergent: true });
+        }
+      }
+      const log = await this.git.run(["log", "-n", "20", HISTORY_FORMAT, base ? `${base}..${tip}` : tip, "--", scope]);
+      out.push({ id, detectedAt: conflictDetectedAt(id), files, commits: parseHistory(log.stdout) });
+    }
+    return out;
+  }
+
+  async readConflictFile(project: string, id: string, side: ConflictSide, path: string): Promise<Buffer | null> {
+    const tip = this.conflictRefs.get(project)?.get(id);
+    if (!tip) return null;
+    const rev = side === "preserved" ? tip : await this.mergeBase(tip, "HEAD");
+    if (!rev) return null;
+    const res = await this.git.run(["cat-file", "blob", `${rev}:${project}/${path}`], { allowFail: true });
+    return res.code === 0 ? res.stdoutBytes : null;
   }
 
   async transaction<T>(
@@ -541,7 +750,7 @@ export class GitBackend implements StorageBackend {
               const rebaseRes = await this.git.run(["rebase", `origin/${this.config.gitBranch}`], { allowFail: true });
 
               if (rebaseRes.code !== 0) {
-                warnings.push(await this.preserveConflict());
+                warnings.push((await this.preserveConflict()).message);
               }
               const after = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
               if (before !== after) {
@@ -555,7 +764,8 @@ export class GitBackend implements StorageBackend {
 
       // Step 2 & 3: Run work and commit
       try {
-        const workRes = await work(new GitTx(this.repoDir, this.index));
+        const tx = new GitTx(this.repoDir, this.index);
+        const workRes = await work(tx);
 
         let commitSha: string | null = null;
         if (workRes.commit) {
@@ -622,13 +832,16 @@ export class GitBackend implements StorageBackend {
                   const diffRes = await this.git.run(["diff", "--name-only", pre, post]);
                   await this.resync(extractChangedProjects(diffRes.stdout));
                 } else {
-                  await this.git.run(["rebase", "--abort"], { allowFail: true });
-                  await this.git.run(["reset", "--hard", `origin/${this.config.gitBranch}`]);
-                  await this.resync(spec.projects);
+                  // Keep every local commit, including this write and earlier unpushed ones.
+                  const preserved = await this.preserveConflict();
+                  const post = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
+                  const diffRes = await this.git.run(["diff", "--name-only", pre, post]);
+                  await this.resync(extractChangedProjects(diffRes.stdout));
                   throw new OkfError(
                     "upstream_conflict",
                     409,
-                    "change conflicts with a concurrent upstream edit; re-read and retry",
+                    `change conflicts with a concurrent upstream edit; ${preserved.message}. Re-read, merge the preserved content, then resolve the conflict`,
+                    { conflicts: preserved.conflicts },
                   );
                 }
               } else {
@@ -643,6 +856,11 @@ export class GitBackend implements StorageBackend {
               pushed = false;
             }
           }
+        }
+
+        if (tx.resolutions.length > 0) {
+          await this.applyResolutions(tx.resolutions);
+          if (this.hasRemote && !syncHalted) warnings.push(...(await this.pushResolutions()));
         }
 
         return {
@@ -697,7 +915,7 @@ export class GitBackend implements StorageBackend {
         const rebaseRes = await this.git.run(["rebase", `origin/${this.config.gitBranch}`], { allowFail: true });
 
         if (rebaseRes.code !== 0) {
-          runError = `rebase conflict; ${await this.preserveConflict()}`;
+          runError = `rebase conflict; ${(await this.preserveConflict()).message}`;
         }
         const after = (await this.git.run(["rev-parse", "HEAD"])).stdout.trim();
         if (before !== after) {
@@ -726,6 +944,11 @@ export class GitBackend implements StorageBackend {
         await this.setRememberedRemoteTip(remoteTip);
       }
 
+      const pendingResolutions = await this.pushResolutions();
+      if (pendingResolutions.length > 0) {
+        const joined = pendingResolutions.join("; ");
+        runError = runError ? `${runError}; ${joined}` : joined;
+      }
       // lastError describes the most recent sync run only.
       this.lastError = runError;
 
@@ -766,39 +989,11 @@ export class GitBackend implements StorageBackend {
 
   async history(project: string, path: string | null, limit: number): Promise<HistoryEntry[]> {
     const clampedLimit = Math.max(1, Math.min(100, limit));
-    const args = [
-      "log",
-      "-n",
-      String(clampedLimit),
-      "--format=%H%x1f%aI%x1f%an%x1f%s%x1f%(trailers:key=Okf-Principal,valueonly)%x1e",
-    ];
-    args.push("--", path === null ? `${project}/` : `${project}/${path}`);
-
-    const res = await this.git.run(args, { allowFail: true });
-    if (res.code !== 0) {
-      return [];
-    }
-
-    const entries = res.stdout.split("\x1e").filter((e) => e.trim().length > 0);
-    const commits: HistoryEntry[] = [];
-
-    for (const entry of entries) {
-      const parts = entry.trim().split("\x1f");
-      const sha = parts[0] ?? "";
-      const at = parts[1] ?? "";
-      const actor = parts[2] ?? "";
-      const subject = parts[3] ?? "";
-      const principalRaw = parts[4]?.trim();
-      commits.push({
-        sha,
-        at,
-        actor,
-        subject,
-        principal: principalRaw && principalRaw.length > 0 ? principalRaw : null,
-      });
-    }
-
-    return commits;
+    const res = await this.git.run(
+      ["log", "-n", String(clampedLimit), HISTORY_FORMAT, "--", path === null ? `${project}/` : `${project}/${path}`],
+      { allowFail: true },
+    );
+    return res.code === 0 ? parseHistory(res.stdout) : [];
   }
 
   archive(project: string): Readable {

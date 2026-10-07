@@ -231,6 +231,27 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
     return service.lint(project);
   });
 
+  app.get("/api/v1/projects/:project/conflicts", { config: read }, async (req) => {
+    const { project } = projectParams.parse(req.params);
+    return service.listConflicts(project);
+  });
+
+  app.get("/api/v1/projects/:project/conflicts/:id/files/*", { config: read }, async (req) => {
+    const {
+      project,
+      id,
+      "*": path,
+    } = z.object({ project: z.string(), id: z.string(), "*": z.string() }).parse(req.params);
+    return service.readConflict(project, id, path);
+  });
+
+  app.post("/api/v1/projects/:project/conflicts/:id/resolution", { config: write }, async (req, reply) => {
+    const { project, id } = z.object({ project: z.string(), id: z.string() }).parse(req.params);
+    const body = z.object({ paths: z.array(z.string()), message: z.string().optional() }).parse(req.body);
+    const result = await service.resolveConflict(principalOf(req), { project, id, ...body, actor: actorOf(req) });
+    return reply.code(201).send(result);
+  });
+
   app.get("/api/v1/projects/:project/archive", { config: read }, async (req, reply) => {
     const { project } = projectParams.parse(req.params);
     const stream = await service.exportArchive(project);

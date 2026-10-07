@@ -233,10 +233,11 @@ export class Git {
   run(
     args: string[],
     opts?: { allowFail?: boolean; stdin?: Buffer | string },
-  ): Promise<{ code: number; stdout: string; stderr: string }> {
+  ): Promise<{ code: number; stdout: string; stdoutBytes: Buffer; stderr: string }> {
     const { promise, resolve, reject } = Promise.withResolvers<{
       code: number;
       stdout: string;
+      stdoutBytes: Buffer;
       stderr: string;
     }>();
 
@@ -270,12 +271,13 @@ export class Git {
     const settle = (code: number, failed: boolean, extraStderr = ""): void => {
       if (settled) return;
       settled = true;
-      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
+      const stdoutBytes = Buffer.concat(stdoutChunks);
+      const stdout = stdoutBytes.toString("utf8");
       const stderr = Buffer.concat(stderrChunks).toString("utf8") + extraStderr;
       if (failed && !opts?.allowFail) {
         reject(new GitError(args, code, stderr, this.config.gitRemoteUrl));
       } else {
-        resolve({ code, stdout, stderr });
+        resolve({ code, stdout, stdoutBytes, stderr });
       }
     };
     child.on("error", (err) => settle(1, true, err.message));
