@@ -25,6 +25,7 @@ import {
   logFileUpdateEntry,
   logImportEntry,
   logInitializationEntry,
+  logMoveEntry,
   logUpdateEntry,
   logVerificationEntry,
   prependLogEntry,
@@ -37,7 +38,7 @@ import {
   resolveReadPath,
 } from "../okf/paths.js";
 import { normalizeRepository } from "../okf/repository.js";
-import { isStale, type Status, type TrustTier } from "../okf/semantics.js";
+import { isProposal, isStale, type Status, type TrustTier } from "../okf/semantics.js";
 import { extractBundleArchive } from "../store/archive.js";
 import {
   bundleSource,
@@ -51,6 +52,10 @@ import { type BundleTree, buildDirListing, lintBundle, planIndexes } from "../st
 import type { Catalog, SearchHit, SearchParams } from "../store/catalog.js";
 import { fsBundleSource } from "../store/fs-util.js";
 import { checkActor, type Principal } from "./principal.js";
+
+/** Former proposal layout: proposals lived under `proposals/` instead of their usual id. */
+const LEGACY_PROPOSAL_DIR = "proposals/";
+const PROPOSAL_TARGET_DIR = "decisions/";
 
 export interface ProjectSummary {
   project: string;
@@ -167,6 +172,7 @@ export class KnowledgeService {
         return;
       }
       await this.catalog.rebuildProject(project, bundleSource(this.storage, project, tree));
+      await this.migrateLegacyProposals(tx, project);
       await this.regenerateIndexes(tx, project, "all");
     });
   }
@@ -182,9 +188,12 @@ export class KnowledgeService {
       await this.catalog.rebuildProject(project, bundleSource(this.storage, project, tree));
     }
 
-    // Reconciliation: regenerate all indexes and ensure log.md; the transaction commits only on change.
+    // Reconciliation: migrate legacy proposals, regenerate all indexes, and ensure log.md; the transaction commits
+    // only on change.
     await this.storage.transaction({ projects }, async (tx) => {
+      let migrated = 0;
       for (const project of projects) {
+        migrated += await this.migrateLegacyProposals(tx, project);
         await this.regenerateIndexes(tx, project, "all");
         if (!(await this.storage.tree(project)).hasFile("log.md")) {
           await tx.writeFile(project, "log.md", "# Update Log\n");
@@ -193,12 +202,59 @@ export class KnowledgeService {
       return {
         value: undefined,
         commit: {
-          subject: "okf: regenerate indexes",
+          subject: migrated > 0 ? "okf: migrate legacy proposals" : "okf: regenerate indexes",
           author: "process:ok-fine",
           principal: { subject: "system", clientId: "ok-fine" },
         },
       };
     });
+  }
+
+  /**
+   * Moves `proposals/<path>` concepts carrying a `proposal` key to `decisions/<path>` (or `<path>-proposal`,
+   * `<path>-proposal-2`, … when taken), byte for byte. Concepts without the key stay. Returns the number moved.
+   */
+  private async migrateLegacyProposals(tx: StorageTx, project: string): Promise<number> {
+    const files = (await this.storage.tree(project)).conceptFiles.filter(
+      (p) => p.startsWith(LEGACY_PROPOSAL_DIR) && p.endsWith(".md"),
+    );
+    let moved = 0;
+    for (const file of files) {
+      const buf = await this.storage.readFile(project, file);
+      if (buf === null) {
+        continue;
+      }
+      const id = file.slice(0, -3);
+      const record = parseConcept(project, id, file, buf);
+      if (!isProposal(record.frontmatter)) {
+        continue;
+      }
+
+      const rest = id.slice(LEGACY_PROPOSAL_DIR.length);
+      const tree = await this.storage.tree(project);
+      let target = `${PROPOSAL_TARGET_DIR}${rest}`;
+      for (let n = 1; tree.hasFile(`${target}.md`); n++) {
+        target = `${PROPOSAL_TARGET_DIR}${rest}-proposal${n === 1 ? "" : `-${n}`}`;
+      }
+      try {
+        normalizeConceptIdForWrite(target);
+      } catch (err) {
+        if (err instanceof OkfError) {
+          this.log.warn({ project, id, target }, "legacy proposal not migrated: invalid target id");
+          continue;
+        }
+        throw err;
+      }
+
+      // Server maintenance, like index regeneration: same bytes, so neither revision nor `generated` changes.
+      await tx.writeFile(project, `${target}.md`, buf);
+      await tx.deleteFile(project, file);
+      this.catalog.remove(project, id);
+      this.catalog.upsert(parseConcept(project, target, `${target}.md`, buf));
+      await this.prependLog(tx, project, logMoveEntry(record.title, id, target, "process:ok-fine"));
+      moved++;
+    }
+    return moved;
   }
 
   /** Writes every index.md that differs from the planned content and deletes obsolete ones. */
@@ -305,6 +361,7 @@ export class KnowledgeService {
     let staleCount = 0;
     const typeCounts: Record<string, number> = {};
     const trustTierCounts: Record<TrustTier, number> = {
+      proposed: 0,
       unverified: 0,
       "machine-confirmed": 0,
       "human-reviewed": 0,
@@ -1239,6 +1296,7 @@ export class KnowledgeService {
       const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
         await tx.replaceProject(args.project, staged);
         await this.catalog.rebuildProject(args.project, staged);
+        await this.migrateLegacyProposals(tx, args.project);
         await this.regenerateIndexes(tx, args.project, "all");
         await this.prependLog(tx, args.project, logImportEntry(args.actor));
 

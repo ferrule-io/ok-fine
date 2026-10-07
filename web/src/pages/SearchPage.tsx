@@ -176,6 +176,7 @@ export function SearchPage() {
           <option value="human-reviewed">Human-reviewed</option>
           <option value="machine-confirmed">Machine-confirmed</option>
           <option value="unverified">Unverified</option>
+          <option value="proposed">Proposed</option>
         </select>
 
         {/* Stale Select */}

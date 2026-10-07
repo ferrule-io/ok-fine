@@ -41,13 +41,14 @@ export function ProjectPage() {
 
   const trustMetrics = useMemo(() => {
     if (!details?.trustTierCounts) {
-      return { total: 0, human: 0, machine: 0, unverified: 0 };
+      return { total: 0, human: 0, machine: 0, unverified: 0, proposed: 0 };
     }
     const human = details.trustTierCounts["human-reviewed"] ?? 0;
     const machine = details.trustTierCounts["machine-confirmed"] ?? 0;
     const unverified = details.trustTierCounts.unverified ?? 0;
-    const total = human + machine + unverified;
-    return { total, human, machine, unverified };
+    const proposed = details.trustTierCounts.proposed ?? 0;
+    const total = human + machine + unverified + proposed;
+    return { total, human, machine, unverified, proposed };
   }, [details?.trustTierCounts]);
 
   const handleExport = async () => {
@@ -204,23 +205,34 @@ export function ProjectPage() {
                       title={`Unverified: ${trustMetrics.unverified}`}
                     />
                   )}
+                  {trustMetrics.proposed > 0 && (
+                    <div
+                      style={{ width: `${(trustMetrics.proposed / trustMetrics.total) * 100}%` }}
+                      className="bg-violet-500"
+                      title={`Proposed: ${trustMetrics.proposed}`}
+                    />
+                  )}
                 </>
               ) : (
                 <div className="w-full bg-surface-2" />
               )}
             </div>
-            <div className="mt-2.5 flex items-center justify-between text-[11px] text-muted">
-              <span className="flex items-center gap-1">
+            <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted">
+              <span className="flex items-center gap-1 whitespace-nowrap">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 <span>{trustMetrics.human} human</span>
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 whitespace-nowrap">
                 <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
                 <span>{trustMetrics.machine} auto</span>
               </span>
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-1 whitespace-nowrap">
                 <span className="h-1.5 w-1.5 rounded-full bg-zinc-400 dark:bg-zinc-600" />
                 <span>{trustMetrics.unverified} unverified</span>
+              </span>
+              <span className="flex items-center gap-1 whitespace-nowrap">
+                <span className="h-1.5 w-1.5 rounded-full bg-violet-500" />
+                <span>{trustMetrics.proposed} proposed</span>
               </span>
             </div>
           </div>

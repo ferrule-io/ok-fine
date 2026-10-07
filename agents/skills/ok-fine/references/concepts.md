@@ -30,7 +30,7 @@ sources:
 
 ## Proposal
 
-Use for designs and decisions for work on an unmerged branch or pull request.
+Use for designs and decisions for work on an unmerged branch or pull request. Write it at the id its type would get (usually `decisions/<slug>`), never over an existing concept. The `proposal` key gives it trust tier `proposed`; when the work lands, the same concept is rewritten as current truth without the key.
 
 ### Frontmatter Example
 ```yaml

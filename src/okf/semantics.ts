@@ -1,4 +1,6 @@
-export type TrustTier = "unverified" | "machine-confirmed" | "human-reviewed";
+/** Trust tiers, lowest to highest trust. */
+export const TRUST_TIERS = ["proposed", "unverified", "machine-confirmed", "human-reviewed"] as const;
+export type TrustTier = (typeof TRUST_TIERS)[number];
 export type Status = "draft" | "stable" | "deprecated";
 
 export const ISO_DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
@@ -20,7 +22,16 @@ export function normalizeVerified(v: unknown): Array<{ by: string; at?: string }
   return result;
 }
 
+/** A concept recording unmerged work: its `proposal` key is set to anything but null/false. */
+export function isProposal(fm: Record<string, unknown> | null | undefined): boolean {
+  const p = fm?.proposal;
+  return p !== undefined && p !== null && p !== false;
+}
+
 export function trustTier(fm: Record<string, unknown> | null | undefined): TrustTier {
+  if (isProposal(fm)) {
+    return "proposed";
+  }
   const verified = normalizeVerified(fm?.verified);
   if (verified.length === 0) {
     return "unverified";

@@ -38,6 +38,10 @@ export function logDeletionEntry(id: string, actor: string, message?: string): s
   return appendMessage(`**Deletion**: Removed \`${id}\` (by ${actor}).`, message);
 }
 
+export function logMoveEntry(title: string, fromId: string, toId: string, actor: string): string {
+  return `**Move**: Moved \`${fromId}\` to [${title}](/${toId}.md) (by ${actor}).`;
+}
+
 export function logFileUpdateEntry(path: string, actor: string, message?: string): string {
   return appendMessage(`**Update**: Wrote file \`${path}\` (by ${actor}).`, message);
 }

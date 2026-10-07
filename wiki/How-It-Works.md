@@ -19,6 +19,8 @@ DATA_DIR/
 - A concept ID is the bundle-relative path without `.md`, e.g. `tables/orders`.
 - **ok-fine owns every `index.md`.** They are regenerated after each write, import, and sync; manual edits are
   overwritten. `log.md` exists only at the project root and is appended to on every change.
+- Concepts under `proposals/` that carry a `proposal` key (the former proposal layout) are moved to `decisions/` at
+  startup, after syncs that pull changes, and on import.
 - The server is a single process with an in-memory catalog and search index, rebuilt from disk at startup.
   Writes are serialized; run **one replica** per data volume.
 
@@ -64,6 +66,7 @@ commit trailer.
 
 | Tier | Meaning |
 |---|---|
+| `proposed` | carries the `proposal` frontmatter key (work not yet in the mainline); takes precedence over `verified` |
 | `unverified` | no `verified` entries |
 | `machine-confirmed` | verified only by agents/processes |
 | `human-reviewed` | verified by at least one `human:` actor |
