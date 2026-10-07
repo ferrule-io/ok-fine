@@ -9,8 +9,8 @@
   "plugins": [
     {
       "name": "ok-fine",
-      "source": "./claude-code",
-      "description": "ok-fine knowledge skills and session hook"
+      "source": "./",
+      "description": "ok-fine knowledge skills, session hook, and pi/omp extension"
     }
   ]
 }
