@@ -4,7 +4,7 @@ settings file to commit: knowledge and the repository-to-project binding both li
 installs one agent package and configures the ok-fine MCP server once per harness.
 
 The agent package is built from [`agents/`](https://github.com/ferrule-io/ok-fine/tree/main/agents) and published to
-[`ferrule-io/ok-fine-agents`](https://github.com/ferrule-io/ok-fine-agents) on every release. It contains:
+[`ferrule-io/ok-fine-agents`](https://github.com/ferrule-io/ok-fine-agents) whenever a release changes it. It contains:
 
 - three [Agent Skills](https://agentskills.io): `ok-fine` (find the project, recall before work, record after),
   `ok-fine-onboard` (bind a repository and bootstrap knowledge), and `ok-fine-review` (lint, staleness, drift,

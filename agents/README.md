@@ -1,8 +1,8 @@
 # ok-fine agent package
 
 > **Generated repository.** `ferrule-io/ok-fine-agents` is published from
-> [`ferrule-io/ok-fine/agents`](https://github.com/ferrule-io/ok-fine/tree/main/agents) on every ok-fine release.
-> Send changes there; edits made here are overwritten.
+> [`ferrule-io/ok-fine/agents`](https://github.com/ferrule-io/ok-fine/tree/main/agents) by ok-fine releases that
+> change the agent package. Send changes there; edits made here are overwritten.
 
 Connects Claude Code, OpenAI Codex CLI, Gemini CLI, pi, and oh-my-pi (omp) to an
 [ok-fine](https://github.com/ferrule-io/ok-fine) knowledge server as shared project memory, without changing any

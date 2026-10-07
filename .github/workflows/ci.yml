@@ -59,7 +59,7 @@ jobs:
           node -e '
             const fs = require("node:fs");
             const path = require("node:path");
-            const root = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
+            const agentVersion = JSON.parse(fs.readFileSync("agents/package.json", "utf8")).version;
             const files = [
               "agents/package.json", "agents/plugin.json", "agents/gemini-extension.json",
               "agents/.claude-plugin/plugin.json", "agents/.claude-plugin/marketplace.json",
@@ -69,8 +69,8 @@ jobs:
             const versioned = new Set(files.slice(0, 4));
             for (const f of files) {
               const json = JSON.parse(fs.readFileSync(f, "utf8"));
-              if (versioned.has(f) && json.version !== root) {
-                console.error(`${f}: version ${json.version} != package.json ${root}`);
+              if (versioned.has(f) && json.version !== agentVersion) {
+                console.error(`${f}: version ${json.version} != agents/package.json ${agentVersion}`);
                 process.exit(1);
               }
             }

@@ -34,7 +34,7 @@ Dependencies point downward only:
 | Auth | `src/auth/` | JWT resource server. ok-fine never issues tokens. |
 | Web UI | `web/` | Read-only SPA built into `dist/ui` and served from memory by `src/http/ui.ts`. Reads only through `/api/v1`; runtime code imports only types from `src/`. `web/src/auth/flow.ts` stays DOM-free (the e2e test runs it). |
 | Dev only | `src/dev/` | Unauthenticated token issuer for tests and local runs. Never wire it into the server. |
-| Agent package | `agents/` | Skills, SessionStart hook, pi/omp extension, harness manifests. Never imports from `src/`; mirrored to `ferrule-io/ok-fine-agents` on release, so edit here only. The Claude Code plugin root `claude-code/` is generated in the mirror by `scripts/build-claude-plugin.ts` with a Claude-only `hooks.json` (no Gemini `BeforeAgent`), because Claude Desktop's marketplace sync validates hooks more strictly than the CLI; `.claude-plugin/marketplace.json` points at it, while `.omp-plugin/marketplace.json` keeps omp on the root. |
+| Agent package | `agents/` | Skills, SessionStart hook, pi/omp extension, harness manifests. Never imports from `src/`; mirrored to `ferrule-io/ok-fine-agents` on releases that change it, so edit here only. The Claude Code plugin root `claude-code/` is generated in the mirror by `scripts/build-claude-plugin.ts` with a Claude-only `hooks.json` (no Gemini `BeforeAgent`), because Claude Desktop's marketplace sync validates hooks more strictly than the CLI; `.claude-plugin/marketplace.json` points at it, while `.omp-plugin/marketplace.json` keeps omp on the root. |
 | Docs | `wiki/` | GitHub wiki source; the `wiki` job in `release.yml` mirrors it to the repository wiki on release, so edit here only. Page titles come from file names; link between pages with full `https://github.com/ferrule-io/ok-fine/wiki/<Page>` URLs. |
 
 ## Invariants
@@ -104,5 +104,10 @@ Break any of these and you have a bug.
 - For Kubernetes testing, use a local cluster (e.g. `minikube -p ok-fine`) and pin `--context`/`--kube-context` on
   every command. Never assume the current context is safe.
 - CI/release workflows live in `.github/workflows/` (`ci.yml` reusable via `workflow_call`; `release.yml` on `main`).
-- Versions in `charts/ok-fine/Chart.yaml` (version + appVersion), `package.json`, `src/version.ts`, and the agent manifests (`agents/package.json`, `agents/plugin.json`, `agents/gemini-extension.json`, `agents/.claude-plugin/plugin.json`) are bumped by the release workflow — don't hand-edit them.
+- The release workflow bumps server versions (`charts/ok-fine/Chart.yaml` version + appVersion, `package.json`,
+  `src/version.ts`) on every release, but bumps the agent manifests (`agents/package.json`, `agents/plugin.json`,
+  `agents/gemini-extension.json`, `agents/.claude-plugin/plugin.json`) to the release version only when `agents/`,
+  `scripts/build-claude-plugin.ts`, or `LICENSE` changed since the release tagged with the current agent version
+  (`v<agents/package.json version>`). So the agent version can lag the server version; the four agent manifests
+  always share one version. Still: don't hand-edit any of these versions.
 - Keep the buildx cache scopes (`image-amd64`, `image-arm64`) identical in both workflows.

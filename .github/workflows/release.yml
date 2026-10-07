@@ -29,6 +29,7 @@ jobs:
       sha: ${{ steps.release.outputs.sha }}
       created: ${{ steps.release.outputs.created }}
       is_latest: ${{ steps.release.outputs.is_latest }}
+      agents_version: ${{ steps.release.outputs.agents_version }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -48,6 +49,7 @@ jobs:
           GITHUB_STEP_SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
 
           S="$(git rev-parse "$SOURCE_SHA")"
+          agents_version_before="$(git show "${S}:agents/package.json" | jq -r .version)"
 
           found_tag=""
           found_commit=""
@@ -93,15 +95,26 @@ jobs:
             IFS='.' read -r major minor patch <<< "$base_version"
             version="${major}.${minor}.$((patch + 1))"
 
+            agents_changed="false"
+            if ! git rev-parse -q --verify "refs/tags/v${agents_version_before}" >/dev/null; then
+              agents_changed="true"
+            elif ! git diff --quiet "v${agents_version_before}" "$S" -- agents scripts/build-claude-plugin.ts LICENSE; then
+              agents_changed="true"
+            fi
+
             sed -i.bak -E "s/^version: .*/version: ${version}/; s/^appVersion: .*/appVersion: \"${version}\"/" charts/ok-fine/Chart.yaml && rm -f charts/ok-fine/Chart.yaml.bak
             sed -i.bak -E "s/\"version\": \"[^\"]+\"/\"version\": \"${version}\"/" package.json && rm -f package.json.bak
             sed -i.bak -E "s/export const VERSION = \"[^\"]+\";/export const VERSION = \"${version}\";/" src/version.ts && rm -f src/version.ts.bak
-            agent_manifests=(agents/package.json agents/plugin.json agents/gemini-extension.json agents/.claude-plugin/plugin.json)
-            for f in "${agent_manifests[@]}"; do
-              sed -i.bak -E "s/\"version\": \"[^\"]+\"/\"version\": \"${version}\"/" "$f" && rm -f "$f.bak"
-            done
 
-            git add charts/ok-fine/Chart.yaml package.json src/version.ts "${agent_manifests[@]}"
+            agent_manifests=(agents/package.json agents/plugin.json agents/gemini-extension.json agents/.claude-plugin/plugin.json)
+            if [ "$agents_changed" = "true" ]; then
+              for f in "${agent_manifests[@]}"; do
+                sed -i.bak -E "s/\"version\": \"[^\"]+\"/\"version\": \"${version}\"/" "$f" && rm -f "$f.bak"
+              done
+              git add "${agent_manifests[@]}"
+            fi
+
+            git add charts/ok-fine/Chart.yaml package.json src/version.ts
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "chore(release): v${version}"
@@ -122,11 +135,19 @@ jobs:
             is_latest="false"
           fi
 
+          agents_version="$(git show "${sha}:agents/package.json" | jq -r .version)"
+          if [ "$agents_version" != "$agents_version_before" ]; then
+            agents_status="bumped"
+          else
+            agents_status="unchanged"
+          fi
+
           {
             echo "version=${version}"
             echo "sha=${sha}"
             echo "created=${created}"
             echo "is_latest=${is_latest}"
+            echo "agents_version=${agents_version}"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -134,6 +155,7 @@ jobs:
             echo "- Commit: \`${sha}\`"
             echo "- Created: \`${created}\`"
             echo "- Latest: \`${is_latest}\`"
+            echo "- Agent package: v${agents_version} (${agents_status})"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release bundle
@@ -374,9 +396,8 @@ jobs:
       - name: Mirror agents/ and tag
         working-directory: mirror
         env:
-          VERSION: ${{ needs.plan.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.agents_version }}
           RELEASE_SHA: ${{ needs.plan.outputs.sha }}
-          IS_LATEST: ${{ needs.plan.outputs.is_latest }}
         shell: bash
         run: |
           set -euo pipefail
@@ -393,7 +414,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit --allow-empty -m "Release v${VERSION} (ferrule-io/ok-fine@${RELEASE_SHA:0:7})"
           git tag -a "v${VERSION}" -m "Release v${VERSION}"
-          if [ "$IS_LATEST" = "true" ]; then
+          highest_mirror_tag="$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)"
+          if [ "$highest_mirror_tag" = "v${VERSION}" ]; then
             git push origin HEAD:main "v${VERSION}"
           else
             git push origin "v${VERSION}"
