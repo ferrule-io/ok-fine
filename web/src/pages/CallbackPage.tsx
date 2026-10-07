@@ -1,7 +1,9 @@
 import { LoaderCircle } from "lucide-react";
+import * as oauth from "oauth4webapi";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { useAuth } from "../auth/AuthProvider.js";
+import { sanitizeReturnTo } from "../auth/returnTo.js";
 import { Page } from "../components/Page.js";
 import { SignInPage } from "./SignInPage.js";
 
@@ -18,10 +20,16 @@ export function CallbackPage() {
     const url = new URL(window.location.href);
     completeLogin(url)
       .then((returnTo) => {
-        navigate(returnTo, { replace: true });
+        navigate(sanitizeReturnTo(returnTo), { replace: true });
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : String(err));
+        let msg: string;
+        if (err instanceof oauth.AuthorizationResponseError || err instanceof oauth.ResponseBodyError) {
+          msg = err.error_description ? `${err.error}: ${err.error_description}` : err.error;
+        } else {
+          msg = err instanceof Error ? err.message : String(err);
+        }
+        setError(msg);
       });
   }, [completeLogin, navigate]);
 

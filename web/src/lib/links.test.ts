@@ -48,6 +48,71 @@ describe("links", () => {
     });
   });
 
+  it("rejects dangerous URL schemes and variants as invalid", () => {
+    const unsafeHrefs = [
+      "javascript:alert(1)",
+      "JavaScript:alert(1)",
+      "  javascript:alert(1)",
+      "\tjavascript:alert(1)",
+      "\njavascript:alert(1)",
+      "\r\njavascript:alert(1)",
+      "jav&#x09;ascript:alert(1)",
+      "javascript&colon;alert(1)",
+      "vbscript:msgbox(1)",
+      "VBScript:msgbox(1)",
+      "data:text/html,<script>alert(1)</script>",
+      "data:image/svg+xml,<svg onload=alert(1)>",
+      "file:///etc/passwd",
+      "blob:https://example.com/uuid",
+      "about:blank",
+    ];
+
+    for (const href of unsafeHrefs) {
+      expect(resolveHref(href, "a/b")).toEqual({ kind: "invalid" });
+    }
+  });
+
+  it("rejects backslash evasion and traversal patterns as invalid", () => {
+    const backslashHrefs = [
+      "\\\\attacker.com\\evil",
+      "/\\attacker.com",
+      "\\attacker.com",
+      "..\\..\\evil.md",
+      "/..\\evil.md",
+      "a/..\\b.md",
+      "///evil.com",
+      "//",
+      "//attacker.com\\evil",
+      "%5c%5cattacker.com",
+    ];
+
+    for (const href of backslashHrefs) {
+      expect(resolveHref(href, "a/b")).toEqual({ kind: "invalid" });
+    }
+  });
+
+  it("accepts safe external URLs", () => {
+    expect(resolveHref("https://example.com", "a")).toEqual({
+      kind: "external",
+      href: "https://example.com",
+    });
+    expect(resolveHref("http://example.com/foo?bar=1#baz", "a")).toEqual({
+      kind: "external",
+      href: "http://example.com/foo?bar=1#baz",
+    });
+    expect(resolveHref("mailto:alice@example.com", "a")).toEqual({
+      kind: "external",
+      href: "mailto:alice@example.com",
+    });
+    expect(resolveHref("tel:+1234567890", "a")).toEqual({
+      kind: "external",
+      href: "tel:+1234567890",
+    });
+    expect(resolveHref("//cdn.example.com/asset.js", "a")).toEqual({
+      kind: "external",
+      href: "//cdn.example.com/asset.js",
+    });
+  });
   it("builds router-relative concept and file URLs", () => {
     expect(conceptUrl("demo", "architecture/system")).toBe("/p/demo/c/architecture/system");
     expect(conceptUrl("demo", "/overview")).toBe("/p/demo/c/overview");

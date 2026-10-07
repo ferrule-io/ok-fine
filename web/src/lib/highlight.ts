@@ -1,3 +1,4 @@
+import DOMPurify from "dompurify";
 import type { HighlighterCore } from "shiki/core";
 import { createHighlighterCore } from "shiki/core";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
@@ -35,6 +36,14 @@ function getHighlighter(): Promise<HighlighterCore> {
   return highlighterPromise;
 }
 
+export function sanitizeHighlightedHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: ["pre", "code", "span", "div"],
+    ALLOWED_ATTR: ["class", "style", "tabindex"],
+    FORBID_TAGS: ["script", "iframe", "object", "embed", "style", "form", "input", "button", "a"],
+    FORBID_ATTR: ["onload", "onerror", "onclick", "onmouseover"],
+  });
+}
 export async function highlight(code: string, lang: string): Promise<string | null> {
   const normalizedLang = lang.trim().toLowerCase();
   if (!normalizedLang) {
@@ -48,13 +57,14 @@ export async function highlight(code: string, lang: string): Promise<string | nu
   }
 
   try {
-    return highlighter.codeToHtml(code, {
+    const raw = highlighter.codeToHtml(code, {
       lang: normalizedLang,
       themes: {
         light: "github-light-default",
         dark: "github-dark-default",
       },
     });
+    return sanitizeHighlightedHtml(raw);
   } catch {
     return null;
   }

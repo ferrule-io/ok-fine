@@ -1,4 +1,41 @@
-const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
+const SAFE_EXTERNAL_SCHEMES: Record<string, true> = {
+  "http:": true,
+  "https:": true,
+  "mailto:": true,
+  "tel:": true,
+};
+
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&#x([0-9a-f]+);?/gi, (_, hex) => {
+      const code = Number.parseInt(hex, 16);
+      return code > 0 && code < 0x10ffff ? String.fromCodePoint(code) : "";
+    })
+    .replace(/&#([0-9]+);?/g, (_, dec) => {
+      const code = Number.parseInt(dec, 10);
+      return code > 0 && code < 0x10ffff ? String.fromCodePoint(code) : "";
+    })
+    .replace(/&colon;?/gi, ":")
+    .replace(/&tab;?/gi, "")
+    .replace(/&newline;?/gi, "");
+}
+
+function stripControlAndWhitespace(str: string): string {
+  let result = "";
+  for (const ch of str) {
+    const code = ch.charCodeAt(0);
+    if (code > 0x20 && !(code >= 0x7f && code <= 0x9f) && !/\s/.test(ch)) {
+      result += ch;
+    }
+  }
+  return result;
+}
+
+function extractScheme(href: string): string | null {
+  const candidate = stripControlAndWhitespace(decodeHtmlEntities(href.trim()));
+  const match = /^[a-z][a-z0-9+.-]*:/i.exec(candidate);
+  return match ? match[0].toLowerCase() : null;
+}
 
 export type ResolvedHref =
   | { kind: "concept"; id: string; hash: string }
@@ -84,18 +121,48 @@ export function resolveHref(href: string, conceptId: string): ResolvedHref {
   if (!href) {
     return { kind: "invalid" };
   }
+
+  const scheme = extractScheme(href);
+  if (scheme !== null) {
+    if (SAFE_EXTERNAL_SCHEMES[scheme]) {
+      return { kind: "external", href: href.trim() };
+    }
+    return { kind: "invalid" };
+  }
+
+  const trimmed = href.trim();
+  if (trimmed.startsWith("//")) {
+    if (href.includes("\\") || !/^\/\/[^/?#\s\\]+(?:\/[^\s\\]*)?(?:#[^\s\\]*)?$/.test(trimmed)) {
+      return { kind: "invalid" };
+    }
+    let decodedProto = trimmed;
+    try {
+      decodedProto = decodeURI(trimmed);
+    } catch {
+      return { kind: "invalid" };
+    }
+    if (decodedProto.includes("\\")) {
+      return { kind: "invalid" };
+    }
+    return { kind: "external", href: trimmed };
+  }
+
   if (href.startsWith("#")) {
     return { kind: "anchor", hash: href };
   }
-  if (href.startsWith("//") || SCHEME_RE.test(href)) {
-    return { kind: "external", href };
-  }
 
+  if (href.includes("\\")) {
+    return { kind: "invalid" };
+  }
   let decoded = href;
   try {
     decoded = decodeURI(href);
   } catch {
     // Keep raw href on malformed URI sequences
+  }
+
+  if (decoded.includes("\\") || decoded.startsWith("//") || decoded.startsWith("/\\")) {
+    return { kind: "invalid" };
   }
 
   let hash = "";
@@ -119,7 +186,7 @@ export function resolveHref(href: string, conceptId: string): ResolvedHref {
     resolved = posixNormalize(prefix ? `${prefix}/${decoded}` : decoded);
   }
 
-  if (resolved === ".." || resolved.startsWith("../") || decoded.endsWith("/")) {
+  if (resolved.includes("\\") || resolved === ".." || resolved.startsWith("../") || decoded.endsWith("/")) {
     return { kind: "invalid" };
   }
 

@@ -84,8 +84,8 @@ export async function resolveClientId(
   }
   const key = `okf.oauth.client:${d.as.issuer}:${redirectUri}`;
   const cached = store.getItem(key);
-  if (cached) {
-    return cached;
+  if (cached && typeof cached === "string" && cached.trim().length > 0) {
+    return cached.trim();
   }
   if (typeof d.as.registration_endpoint !== "string") {
     throw new Error("sign-in is not configured");

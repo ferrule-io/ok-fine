@@ -43,6 +43,9 @@ const CONTENT_TYPES: Record<string, string> = {
 };
 
 const IMMUTABLE = "public, max-age=31536000, immutable";
+const PERMISSIONS_POLICY = "camera=(), display-capture=(), geolocation=(), microphone=()";
+const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+const DEFAULT_CSP = "frame-ancestors 'none'";
 
 /** Unique origins of the string http(s) URLs among `endpoints`; ignores anything else. */
 export function endpointOrigins(...endpoints: unknown[]): string[] {
@@ -91,54 +94,66 @@ export async function registerUiRoutes(app: FastifyInstance, options: UiRouteOpt
     return false;
   }
 
-  const csp = [
+  const htmlCsp = [
     "default-src 'self'",
     "script-src 'self'",
-    // Shiki emits inline style attributes.
+    // Shiki emits inline style attributes for code block syntax highlighting.
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https:",
+    "img-src 'self' data:",
     "font-src 'self' data:",
     `connect-src 'self'${options.connectSrc.map((origin) => ` ${origin}`).join("")}`,
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
     "frame-ancestors 'none'",
+    ...(options.publicBaseUrl.startsWith("https://") ? ["upgrade-insecure-requests"] : []),
   ].join("; ");
 
-  const sendHtml = (reply: FastifyReply) =>
-    reply
-      .header("content-type", "text/html; charset=utf-8")
-      .header("cache-control", "no-cache")
-      .header("referrer-policy", "no-referrer")
-      .header("x-frame-options", "DENY")
-      .header("x-content-type-options", "nosniff")
-      .header("content-security-policy", csp)
-      .send(index.body);
+  await app.register(async (ui) => {
+    ui.addHook("onSend", async (_req, reply, payload) => {
+      reply.header("x-content-type-options", "nosniff");
+      reply.header("x-frame-options", "DENY");
+      reply.header("referrer-policy", "no-referrer");
+      reply.header("cross-origin-opener-policy", "same-origin");
+      reply.header("permissions-policy", PERMISSIONS_POLICY);
 
-  app.get("/", async (_req, reply) => reply.redirect("/ui/", 302));
-  app.get("/ui", async (_req, reply) => reply.redirect("/ui/", 301));
-  app.get("/ui/config.json", async (_req, reply) =>
-    reply.header("cache-control", "no-store").header("x-content-type-options", "nosniff").send(options.clientConfig),
-  );
-  app.get<{ Params: { "*": string } }>("/ui/*", async (req, reply) => {
-    const rel = req.params["*"];
-    if (rel === "" || rel === "index.html") return sendHtml(reply);
-    const asset = assets.get(rel);
-    if (asset) {
-      return reply
-        .header("content-type", asset.type)
-        .header("cache-control", asset.cache)
-        .header("x-content-type-options", "nosniff")
-        .send(asset.body);
-    }
-    const last = rel.slice(rel.lastIndexOf("/") + 1);
-    if (/\.[A-Za-z0-9]+$/.test(last)) {
-      return reply
-        .code(404)
-        .header("x-content-type-options", "nosniff")
-        .send({ error: { code: "not_found", message: "not found" } });
-    }
-    return sendHtml(reply);
+      const contentType = reply.getHeader("content-type");
+      if (typeof contentType === "string" && contentType.startsWith("image/svg+xml")) {
+        reply.header("content-security-policy", SVG_CSP);
+      } else if (!reply.hasHeader("content-security-policy")) {
+        reply.header("content-security-policy", DEFAULT_CSP);
+      }
+      return payload;
+    });
+
+    const sendHtml = (reply: FastifyReply) =>
+      reply
+        .header("content-type", "text/html; charset=utf-8")
+        .header("cache-control", "no-cache")
+        .header("content-security-policy", htmlCsp)
+        .send(index.body);
+
+    ui.get("/", async (_req, reply) => reply.redirect("/ui/", 302));
+    ui.get("/ui", async (_req, reply) => reply.redirect("/ui/", 301));
+    ui.get("/ui/config.json", async (_req, reply) =>
+      reply.header("cache-control", "no-store").send(options.clientConfig),
+    );
+    ui.get<{ Params: { "*": string } }>("/ui/*", async (req, reply) => {
+      const rel = req.params["*"];
+      if (rel === "" || rel === "index.html") return sendHtml(reply);
+      const asset = assets.get(rel);
+      if (asset) {
+        return reply.header("content-type", asset.type).header("cache-control", asset.cache).send(asset.body);
+      }
+      const last = rel.slice(rel.lastIndexOf("/") + 1);
+      if (/\.[A-Za-z0-9]+$/.test(last)) {
+        return reply
+          .code(404)
+          .header("cache-control", "no-cache")
+          .send({ error: { code: "not_found", message: "not found" } });
+      }
+      return sendHtml(reply);
+    });
   });
 
   app.log.info({ url: `${options.publicBaseUrl}/ui/` }, "web UI enabled");
