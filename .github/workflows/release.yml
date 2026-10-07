@@ -365,6 +365,12 @@ jobs:
           fetch-depth: 0
           path: mirror
 
+      - name: Set up mise
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5
+        with:
+          cache: true
+          working_directory: source
+
       - name: Mirror agents/ and tag
         working-directory: mirror
         env:
@@ -380,6 +386,7 @@ jobs:
           fi
           find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
           cp -a ../source/agents/. .
+          node ../source/scripts/build-claude-plugin.ts . claude-code
           cp ../source/LICENSE ./LICENSE
           git add -A
           git config user.name "github-actions[bot]"

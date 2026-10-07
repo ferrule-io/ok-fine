@@ -55,13 +55,16 @@ jobs:
 
       - name: Validate agent package
         run: |
+          node scripts/build-claude-plugin.ts agents
           node -e '
             const fs = require("node:fs");
+            const path = require("node:path");
             const root = JSON.parse(fs.readFileSync("package.json", "utf8")).version;
             const files = [
               "agents/package.json", "agents/plugin.json", "agents/gemini-extension.json",
               "agents/.claude-plugin/plugin.json", "agents/.claude-plugin/marketplace.json",
-              "agents/.agents/plugins/marketplace.json", "agents/hooks/hooks.json",
+              "agents/.omp-plugin/marketplace.json", "agents/.agents/plugins/marketplace.json",
+              "agents/hooks/hooks.json",
             ];
             const versioned = new Set(files.slice(0, 4));
             for (const f of files) {
@@ -71,12 +74,18 @@ jobs:
                 process.exit(1);
               }
             }
-            // omp drops catalog entries whose string source does not start with "./".
-            const catalog = JSON.parse(fs.readFileSync("agents/.claude-plugin/marketplace.json", "utf8"));
-            for (const p of catalog.plugins) {
-              if (typeof p.source === "string" && !p.source.startsWith("./")) {
-                console.error(`marketplace.json: plugin ${p.name} source "${p.source}" must start with "./"`);
-                process.exit(1);
+            // omp drops catalog entries whose string source does not start with "./"; every source must be a
+            // plugin root (agents/claude-code is generated above, as in the release mirror).
+            for (const f of ["agents/.claude-plugin/marketplace.json", "agents/.omp-plugin/marketplace.json"]) {
+              for (const p of JSON.parse(fs.readFileSync(f, "utf8")).plugins) {
+                if (typeof p.source !== "string" || !p.source.startsWith("./")) {
+                  console.error(`${f}: plugin ${p.name} source must be a string starting with "./"`);
+                  process.exit(1);
+                }
+                if (!fs.statSync(path.join("agents", p.source), { throwIfNoEntry: false })?.isDirectory()) {
+                  console.error(`${f}: plugin ${p.name} source "${p.source}" is not a directory`);
+                  process.exit(1);
+                }
               }
             }
           '

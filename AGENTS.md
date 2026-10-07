@@ -34,7 +34,7 @@ Dependencies point downward only:
 | Auth | `src/auth/` | JWT resource server. ok-fine never issues tokens. |
 | Web UI | `web/` | Read-only SPA built into `dist/ui` and served from memory by `src/http/ui.ts`. Reads only through `/api/v1`; runtime code imports only types from `src/`. `web/src/auth/flow.ts` stays DOM-free (the e2e test runs it). |
 | Dev only | `src/dev/` | Unauthenticated token issuer for tests and local runs. Never wire it into the server. |
-| Agent package | `agents/` | Skills, SessionStart hook, pi/omp extension, harness manifests. Never imports from `src/`; mirrored to `ferrule-io/ok-fine-agents` on release, so edit here only. |
+| Agent package | `agents/` | Skills, SessionStart hook, pi/omp extension, harness manifests. Never imports from `src/`; mirrored to `ferrule-io/ok-fine-agents` on release, so edit here only. The Claude Code plugin root `claude-code/` is generated in the mirror by `scripts/build-claude-plugin.ts` with a Claude-only `hooks.json` (no Gemini `BeforeAgent`), because Claude Desktop's marketplace sync validates hooks more strictly than the CLI; `.claude-plugin/marketplace.json` points at it, while `.omp-plugin/marketplace.json` keeps omp on the root. |
 | Docs | `wiki/` | GitHub wiki source; the `wiki` job in `release.yml` mirrors it to the repository wiki on release, so edit here only. Page titles come from file names; link between pages with full `https://github.com/ferrule-io/ok-fine/wiki/<Page>` URLs. |
 
 ## Invariants
