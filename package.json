@@ -1,6 +1,6 @@
 {
   "name": "@ferrule-io/ok-fine",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "OKF v0.2 knowledge repository for AI agents (MCP + REST)",
   "license": "Apache-2.0",
   "repository": {
