@@ -44,7 +44,15 @@ export interface Conflict {
   /** Changes to non-generated files (index.md files and the root log.md are omitted). */
   files: ConflictFile[];
   /** Writes the preserved side holds for this project, newest first. */
-  commits: HistoryEntry[];
+  writes: ConflictWrite[];
+}
+
+export interface ConflictWrite {
+  /** ISO 8601. */
+  at: string;
+  actor: string;
+  /** One-line description of the write. */
+  subject: string;
 }
 
 export interface ConflictFile {

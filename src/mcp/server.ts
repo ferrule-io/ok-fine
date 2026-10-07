@@ -190,7 +190,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
     {
       title: "List conflicts",
       description:
-        "List the project's unresolved conflicts: writes the server accepted but could not reconcile with a concurrent edit from another ok-fine instance. Each lists changed files (divergent = the current version also changed) and the commits that made them.",
+        "List the project's unresolved conflicts: writes the server accepted but could not reconcile with a concurrent edit from another ok-fine instance. Each lists changed files (divergent = the current version also changed) and the preserved `writes` (at, actor, subject).",
       inputSchema: z.object({ project }),
       annotations: readOnly,
     },

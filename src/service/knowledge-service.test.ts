@@ -640,7 +640,7 @@ title: Remote X
     expect((await service.lint("alpha")).issues).toContainEqual(conflictIssue);
     expect(afterSync.issues).toContainEqual(conflictIssue);
     const listed = await service.listConflicts("alpha");
-    expect(listed.conflicts.map((c) => [c.id, c.files, c.commits.map((h) => h.actor)])).toEqual([
+    expect(listed.conflicts.map((c) => [c.id, c.files, c.writes.map((w) => w.actor)])).toEqual([
       [conflictId, [{ path: "concept-x.md", change: "added", divergent: true }], ["agent/1.0"]],
     ]);
     await service.createProject(alice, { project: "beta", title: "Beta", actor: "human:alice" });

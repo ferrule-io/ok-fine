@@ -9,7 +9,7 @@ A client only sees the tools its token's scopes allow. Over stdio, every tool is
 | `get_history` | read | Git history of a concept or project |
 | `read_file` | read | Any text file verbatim (including `index.md`, `log.md`, assets) |
 | `lint_project` | read | OKF conformance report, plus an `unresolved_conflict` warning per file of each unresolved conflict |
-| `list_conflicts` | read | The project's unresolved conflicts: id, changed files (`change`, `divergent`), and the commits that made them |
+| `list_conflicts` | read | The project's unresolved conflicts: id, changed files (`change`, `divergent`), and the preserved `writes` (`at`, `actor`, `subject`) |
 | `read_conflict` | read | One file of a conflict: `preserved`, `base`, and `current` (with `revision`); null = absent on that side |
 | `submit_feedback` | read | Prefilled public GitHub issue link for feedback about ok-fine; the user submits it |
 | `create_project` | write | New bundle with `overview.md`, `log.md`, `index.md` |

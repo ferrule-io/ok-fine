@@ -698,7 +698,8 @@ export class GitBackend implements StorageBackend {
         }
       }
       const log = await this.git.run(["log", "-n", "20", HISTORY_FORMAT, base ? `${base}..${tip}` : tip, "--", scope]);
-      out.push({ id, detectedAt: conflictDetectedAt(id), files, commits: parseHistory(log.stdout) });
+      const writes = parseHistory(log.stdout).map(({ at, actor, subject }) => ({ at, actor, subject }));
+      out.push({ id, detectedAt: conflictDetectedAt(id), files, writes });
     }
     return out;
   }
