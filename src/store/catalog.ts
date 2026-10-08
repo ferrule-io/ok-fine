@@ -39,6 +39,25 @@ interface IndexedDoc {
   tags: string;
   type: string;
   body: string;
+  keywords: string;
+  synonyms: string;
+}
+
+function extractStrings(frontmatter: Record<string, unknown> | null | undefined, keys: string[]): string[] {
+  if (!frontmatter) return [];
+  const out: string[] = [];
+  for (const key of keys) {
+    const raw = frontmatter[key];
+    const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
+    for (const value of values) {
+      if (typeof value !== "string") continue;
+      const trimmed = value.trim();
+      if (trimmed.length > 0 && !out.includes(trimmed)) {
+        out.push(trimmed);
+      }
+    }
+  }
+  return out;
 }
 
 function tierRank(tier: TrustTier): number {
@@ -84,10 +103,10 @@ export class Catalog {
   constructor() {
     this.miniSearch = new MiniSearch<IndexedDoc>({
       idField: "key",
-      fields: ["title", "description", "tags", "type", "idText", "body"],
+      fields: ["title", "description", "tags", "type", "idText", "keywords", "synonyms", "body"],
       storeFields: ["project", "id"],
       searchOptions: {
-        boost: { title: 3, description: 2, tags: 2, idText: 1.5, type: 1, body: 1 },
+        boost: { title: 3, description: 2, tags: 2, keywords: 2.5, synonyms: 2.5, idText: 1.5, type: 1, body: 1 },
         prefix: (t) => t.length >= 3,
         fuzzy: (t) => (t.length >= 5 ? 0.2 : 0),
       },
@@ -181,8 +200,12 @@ export class Catalog {
         tags: record.tags.join(" "),
         type: record.type ?? "",
         body: record.body,
+        keywords: extractStrings(
+          record.frontmatter,
+          record.id === "overview" ? ["keywords", "domains", "teams", "audience"] : ["keywords"],
+        ).join(" "),
+        synonyms: extractStrings(record.frontmatter, ["synonyms", "aliases"]).join(" "),
       };
-
       if (this.miniSearch.has(key)) {
         this.miniSearch.replace(doc);
       } else {

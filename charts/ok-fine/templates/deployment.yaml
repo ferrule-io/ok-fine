@@ -79,6 +79,10 @@ spec:
               value: {{ include "ok-fine.publicBaseUrl" . | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
+            {{- if .Values.config.hubProject }}
+            - name: HUB_PROJECT
+              value: {{ .Values.config.hubProject | quote }}
+            {{- end }}
             - name: MAX_FILE_BYTES
               value: {{ .Values.config.maxFileBytes | int | quote }}
             - name: MAX_ARCHIVE_BYTES

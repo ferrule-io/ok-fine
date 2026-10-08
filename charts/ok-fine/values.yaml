@@ -13,6 +13,7 @@ serviceAccount:
 config:
   publicBaseUrl: ""  # REQUIRED, e.g. https://okf.example.com; MCP endpoint is <publicBaseUrl>/mcp
   logLevel: info
+  hubProject: org    # hub project name, always included in orient results when it exists
   maxFileBytes: 1048576
   maxArchiveBytes: 52428800
   defaultStaleAfterDays: null  # opt-in: stamps stale_after = now + N days on write_concept when omitted

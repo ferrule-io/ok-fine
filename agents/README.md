@@ -10,7 +10,7 @@ file in your codebases. It ships three Agent Skills (`ok-fine`, `ok-fine-onboard
 Claude Code, Codex, and Gemini CLI and an extension for pi and omp that tell the agent which git repository
 it is in and to look up its ok-fine project before planning or editing; the full reminder is injected at session
 start, then a one-line reminder on each prompt until the session has called an ok-fine lookup tool
-(`list_projects`, `search_concepts`, `read_concept`, `get_index`). See
+(`list_projects`, `search_concepts`, `read_concept`, `get_index`, `orient`). See
 [Using ok-fine from coding agents](https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents) for the
 full lifecycle and identity-provider requirements.
 

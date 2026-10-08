@@ -33,7 +33,8 @@ interface Api {
 }
 
 const CUSTOM_TYPE = "ok-fine.repository";
-const OK_FINE_TOOL_PATTERN = /^(?:.*ok[-_]fine.*[_:/.-])?(?:list_projects|search_concepts|read_concept|get_index)$/i;
+const OK_FINE_TOOL_PATTERN =
+  /^(?:.*ok[-_]fine.*[_:/.-])?(?:list_projects|search_concepts|read_concept|get_index|orient)$/i;
 
 function fullReminder(url: string): string {
   return `ok-fine: this workspace is the git repository ${url}; its shared project knowledge is kept in the ok-fine MCP server, not in this codebase. Before planning or editing, call the ok-fine list_projects tool with repository set to ${url}, then search_concepts with key terms from the task, and read the relevant concepts with read_concept. Follow the ok-fine skill for drift checks and for recording knowledge afterwards. If no project matches, say so once and offer the ok-fine-onboard skill. If the ok-fine tools are unavailable, mention it once and continue.`;
