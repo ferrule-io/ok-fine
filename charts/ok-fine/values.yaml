@@ -36,6 +36,15 @@ oauth:               # used only when auth.mode=oidc
   groupsClaim: ""              # optional: claim containing user groups (default: "groups")
   allowedClientIds: []         # optional: restrict access to specific OAuth client IDs (azp / client_id)
   uiClientId: ""   # public client for the web UI (auth code + PKCE, redirect <publicBaseUrl>/ui/callback); empty = dynamic client registration
+access:
+  # Per-project access control: map of project name to read/write groups.
+  # Empty or absent project allows all authenticated callers with appropriate scopes.
+  # Example:
+  #   projects:
+  #     hr:
+  #       readGroups: [hr]
+  #       writeGroups: [hr-admins]
+  projects: {}
 git:
   branch: main
   remote:

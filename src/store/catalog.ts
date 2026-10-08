@@ -13,6 +13,7 @@ export interface SearchParams {
   trustTier?: TrustTier;
   stale?: boolean;
   limit?: number;
+  allowedProjects?: (project: string) => boolean;
 }
 
 export interface SearchHit {
@@ -295,6 +296,9 @@ export class Catalog {
       if (record.parseError) {
         return false;
       }
+      if (params.allowedProjects && !params.allowedProjects(record.project)) {
+        return false;
+      }
       if (params.project && record.project !== params.project) {
         return false;
       }
@@ -374,7 +378,9 @@ export class Catalog {
       return results.slice(0, limit);
     } else {
       const results: SearchHit[] = [];
-      const projectList = params.project ? [params.project] : this.projects();
+      const projectList = (params.project ? [params.project] : this.projects()).filter(
+        (p) => !params.allowedProjects || params.allowedProjects(p),
+      );
 
       for (const p of projectList) {
         const pRecords = this.records(p);

@@ -120,7 +120,7 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
         query: z.string().optional(),
       })
       .parse(req.query);
-    return service.listProjects({ repository, team, query });
+    return service.listProjects(principalOf(req), { repository, team, query });
   });
 
   app.get("/api/v1/orient", { config: read }, async (req) => {
@@ -144,7 +144,7 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
 
   app.get("/api/v1/projects/:project", { config: read }, async (req) => {
     const { project } = projectParams.parse(req.params);
-    return service.getProject(project);
+    return service.getProject(principalOf(req), project);
   });
 
   app.delete("/api/v1/projects/:project", { config: admin }, async (req) => {
@@ -155,12 +155,12 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
   app.get("/api/v1/projects/:project/index", { config: read }, async (req) => {
     const { project } = projectParams.parse(req.params);
     const { path } = z.object({ path: z.string().optional() }).parse(req.query);
-    return service.getIndex(project, path ?? "");
+    return service.getIndex(principalOf(req), project, path ?? "");
   });
 
   app.get("/api/v1/projects/:project/concepts/*", { config: read }, async (req, reply) => {
     const { project, "*": id } = wildcardParams.parse(req.params);
-    const concept = withRevision(reply, await service.readConcept(project, id));
+    const concept = withRevision(reply, await service.readConcept(principalOf(req), project, id));
     if ((req.headers.accept ?? "").includes("text/markdown")) {
       return reply.type("text/markdown; charset=utf-8").send(concept.markdown);
     }
@@ -207,7 +207,7 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
 
   app.get("/api/v1/projects/:project/files/*", { config: read }, async (req, reply) => {
     const { project, "*": path } = wildcardParams.parse(req.params);
-    const file = withRevision(reply, await service.readFile(project, path));
+    const file = withRevision(reply, await service.readFile(principalOf(req), project, path));
     const extension = /\.[^./]+$/.exec(path)?.[0].toLowerCase() ?? "";
     return reply.type(CONTENT_TYPE_BY_EXTENSION[extension] ?? "text/plain; charset=utf-8").send(file.content);
   });
@@ -241,17 +241,17 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
     const { id, limit } = z
       .object({ id: z.string().optional(), limit: z.coerce.number().int().min(1).max(100).optional() })
       .parse(req.query);
-    return service.history(project, id, limit);
+    return service.history(principalOf(req), project, id, limit);
   });
 
   app.get("/api/v1/projects/:project/lint", { config: read }, async (req) => {
     const { project } = projectParams.parse(req.params);
-    return service.lint(project);
+    return service.lint(principalOf(req), project);
   });
 
   app.get("/api/v1/projects/:project/conflicts", { config: read }, async (req) => {
     const { project } = projectParams.parse(req.params);
-    return service.listConflicts(project);
+    return service.listConflicts(principalOf(req), project);
   });
 
   app.get("/api/v1/projects/:project/conflicts/:id/files/*", { config: read }, async (req) => {
@@ -260,7 +260,7 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
       id,
       "*": path,
     } = z.object({ project: z.string(), id: z.string(), "*": z.string() }).parse(req.params);
-    return service.readConflict(project, id, path);
+    return service.readConflict(principalOf(req), project, id, path);
   });
 
   app.post("/api/v1/projects/:project/conflicts/:id/resolution", { config: write }, async (req, reply) => {
@@ -272,7 +272,7 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
 
   app.get("/api/v1/projects/:project/archive", { config: read }, async (req, reply) => {
     const { project } = projectParams.parse(req.params);
-    const stream = await service.exportArchive(project);
+    const stream = service.exportArchive(principalOf(req), project);
     return reply
       .type("application/gzip")
       .header("content-disposition", `attachment; filename="${project}.tar.gz"`)
@@ -289,7 +289,7 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
 
   app.get("/api/v1/search", { config: read }, async (req) => {
     const q = searchQuery.parse(req.query);
-    return service.search({
+    return service.search(principalOf(req), {
       ...(q.q === undefined ? {} : { query: q.q }),
       ...(q.project === undefined ? {} : { project: q.project }),
       ...(q.type === undefined ? {} : { type: q.type }),

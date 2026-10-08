@@ -29,9 +29,11 @@ updates or `If-None-Match: *` for create-only PUTs of concepts and files (other 
 | POST | `/sync` | admin | sync now |
 
 Errors use one shape: `{ "error": { "code", "message", "details"? } }`. Codes include `bad_request`, `invalid_id`,
-`invalid_actor`, `forbidden_actor`, `project_not_found`, `not_found`, `already_exists`, `revision_conflict`,
+`invalid_actor`, `forbidden_actor`, `forbidden`, `project_not_found`, `not_found`, `already_exists`, `revision_conflict`,
 `upstream_conflict` (`details.conflicts` names the conflicts that preserved the write), `payload_too_large`,
 `unsupported_media`, and `bundle_not_conformant`.
+
+When project access control is configured, unreadable projects return `project_not_found` (404) on all endpoints (including mutations and creation) to prevent leaking existence. A caller with read access who attempts mutations without required write group membership receives `forbidden` (403).
 
 Unauthenticated endpoints: `GET /healthz` (always unauthenticated). In `oidc` mode, the OAuth discovery routes
 `GET /.well-known/oauth-protected-resource[/mcp]` and `GET /.well-known/oauth-authorization-server` are also
