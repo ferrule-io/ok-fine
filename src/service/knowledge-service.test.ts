@@ -245,7 +245,7 @@ describe("KnowledgeService", () => {
     expect(service.listProjects({ team: "tier-1" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
     expect(service.listProjects({ team: "nonexistent" }).projects.map((p) => p.project)).toEqual([]);
 
-    // 3. Query filter: domains, keywords (prefix campaign -> campaigns, ticket -> tickets), title
+    // 3. Query filter: domains, keywords (prefix campaign -> campaigns, ticket -> tickets), title, description
     expect(service.listProjects({ query: "growth" }).projects.map((p) => p.project)).toEqual(["marketing-site"]);
     expect(service.listProjects({ query: "infra" }).projects.map((p) => p.project)).toEqual(["platform-core"]);
     expect(service.listProjects({ query: "campaign" }).projects.map((p) => p.project)).toEqual([
@@ -254,8 +254,8 @@ describe("KnowledgeService", () => {
     ]);
     expect(service.listProjects({ query: "ticket" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
     expect(service.listProjects({ query: "ad" }).projects.map((p) => p.project)).toEqual(["marketing-site"]);
+    expect(service.listProjects({ query: "desk" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
     expect(service.listProjects({ query: "zeta" }).projects.map((p) => p.project)).toEqual(["unrelated-proj"]);
-
     // Query terms appearing only in owners or audience do not match
     expect(service.listProjects({ query: "alice" }).projects).toEqual([]);
     expect(service.listProjects({ query: "carol" }).projects).toEqual([]);

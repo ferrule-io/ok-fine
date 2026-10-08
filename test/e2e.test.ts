@@ -388,6 +388,80 @@ describe("ok-fine with AUTH_MODE=none", () => {
     await client.close();
   });
 
+  it("exposes routing metadata on MCP and REST list_projects and filters by team and query", async () => {
+    const client = await connectAnonymous(noneServer.url);
+    try {
+      const created = await call(client, "create_project", {
+        project: "routing-demo",
+        title: "Routing Demo",
+        actor: "e2e/1.0",
+      });
+      expect(created.isError).toBeFalsy();
+
+      interface OverviewView {
+        revision: string;
+        body: string;
+        frontmatter: Record<string, unknown>;
+      }
+      const read = await call<OverviewView>(client, "read_concept", {
+        project: "routing-demo",
+        id: "overview",
+      });
+      expect(read.isError).toBeFalsy();
+      const readData = read.structuredContent;
+
+      const written = await call(client, "write_concept", {
+        project: "routing-demo",
+        id: "overview",
+        expectedRevision: readData.revision,
+        frontmatter: {
+          ...readData.frontmatter,
+          teams: ["Support"],
+          domains: ["billing"],
+          keywords: ["refunds"],
+          audience: ["tier-1"],
+          owners: ["support-leads"],
+        },
+        body: readData.body,
+        actor: "e2e/1.0",
+      });
+      expect(written.isError).toBeFalsy();
+
+      interface ProjectsResponse {
+        projects: Record<string, unknown>[];
+      }
+      const mcpList = await call<ProjectsResponse>(client, "list_projects", {
+        team: "support",
+        query: "refund",
+      });
+      expect(mcpList.isError).toBeFalsy();
+      const mcpProjects = mcpList.structuredContent.projects;
+
+      const restRes = await fetch(`${noneServer.url}/api/v1/projects?team=support&query=refund`);
+      expect(restRes.status).toBe(200);
+      const restData = (await restRes.json()) as ProjectsResponse;
+
+      const expectedRouting = {
+        project: "routing-demo",
+        teams: ["Support"],
+        domains: ["billing"],
+        keywords: ["refunds"],
+        audience: ["tier-1"],
+        owners: ["support-leads"],
+      };
+
+      expect(mcpProjects).toHaveLength(1);
+      expect(mcpProjects[0]).toMatchObject(expectedRouting);
+
+      expect(restData.projects).toHaveLength(1);
+      expect(restData.projects[0]).toMatchObject(expectedRouting);
+
+      expect(mcpProjects[0]).toEqual(restData.projects[0]);
+    } finally {
+      await client.close();
+    }
+  });
+
   it("rejects REST write with human:dev actor with 403 forbidden_actor", async () => {
     const res = await fetch(`${noneServer.url}/api/v1/projects/insecure-demo/concepts/notes`, {
       method: "PUT",
