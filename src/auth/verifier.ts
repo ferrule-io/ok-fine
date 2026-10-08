@@ -126,13 +126,7 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
       }
 
       if (requiredGroups.length > 0) {
-        const groupsVal = payload[groupsClaim];
-        let tokenGroups: string[] = [];
-        if (typeof groupsVal === "string") {
-          tokenGroups = [groupsVal];
-        } else if (Array.isArray(groupsVal)) {
-          tokenGroups = groupsVal.filter((g): g is string => typeof g === "string");
-        }
+        const tokenGroups = readGroups(payload[groupsClaim]);
         const hasRequiredGroup = tokenGroups.some((g) => requiredGroups.includes(g));
         if (!hasRequiredGroup) {
           throw new OAuthError(OAuthErrorCode.InsufficientScope, "token not permitted by this server's access policy");
@@ -166,6 +160,8 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
       }
     }
 
+    const groups = readGroups(payload[this.access?.groupsClaim ?? "groups"]);
+
     return {
       token,
       clientId,
@@ -174,10 +170,19 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
       extra: {
         sub: typeof payload.sub === "string" ? payload.sub : "unknown",
         identity,
+        groups,
       },
     };
   }
 }
+
+/** Normalizes a groups claim, accepted as a string or an array of strings. */
+function readGroups(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.filter((g): g is string => typeof g === "string");
+  return [];
+}
+
 /**
  * Computes a Principal from an AuthInfo and configured scope names.
  * Hierarchy:
@@ -196,14 +201,17 @@ export function principalFromAuthInfo(info: AuthInfo, scopeNames: ScopeNames): P
 
   const extraSub = info.extra?.sub;
   const extraIdentity = info.extra?.identity;
+  const extraGroups = info.extra?.groups;
 
   const sub = typeof extraSub === "string" ? extraSub : "unknown";
   const identity = typeof extraIdentity === "string" ? extraIdentity : null;
+  const groups = Array.isArray(extraGroups) ? extraGroups.filter((g): g is string => typeof g === "string") : [];
 
   return {
     subject: sub,
     clientId: info.clientId,
     identity,
+    groups,
     scopes: info.scopes,
     canRead,
     canWrite,

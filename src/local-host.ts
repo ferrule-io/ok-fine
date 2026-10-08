@@ -116,6 +116,7 @@ export async function createLocalHost(options: CreateLocalHostOptions): Promise<
         subject: "local",
         clientId: "stdio",
         identity,
+        groups: [],
         scopes: [],
         canRead: true,
         canWrite: true,

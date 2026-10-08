@@ -15,7 +15,7 @@ message naming every bad variable.
 | `OAUTH_ALLOWED_SUBJECTS` | unset | Comma-separated list of allowed JWT `sub` values (`oidc` mode only) |
 | `OAUTH_ALLOWED_EMAILS` | unset | Comma-separated list of allowed emails, compared case-insensitively, requiring `email_verified=true` (`oidc` mode only) |
 | `OAUTH_REQUIRED_GROUPS` | unset | Comma-separated list of required groups; token's groups claim must intersect (`oidc` mode only) |
-| `OAUTH_GROUPS_CLAIM` | `groups` | Claim name to read for user groups (`oidc` mode only) |
+| `OAUTH_GROUPS_CLAIM` | `groups` | Claim name to read for user groups, used by `OAUTH_REQUIRED_GROUPS` and carried on the request principal (`oidc` mode only) |
 | `OAUTH_ALLOWED_CLIENT_IDS` | unset | Comma-separated list of allowed client IDs matched against `azp`, `client_id`, or `cid` (`oidc` mode only) |
 | `OAUTH_ALLOW_INSECURE_ISSUER` | `false` | Allow an `http://` issuer (development only, `oidc` mode only) |
 | `TRUST_PROXY` | `loopback,linklocal,uniquelocal` | Fastify trustProxy setting (`true`, `false`, hop count, or comma-separated CIDRs/keywords); affects logged client IP/protocol only |

@@ -633,6 +633,62 @@ describe("OAuth authentication and verification", () => {
     });
   });
 
+  describe("Principal.groups", () => {
+    async function groupsFor(claims: Record<string, unknown>, groupsClaim?: string): Promise<string[]> {
+      const verifier = new JwtTokenVerifier({
+        issuer: devIssuer.url,
+        audiences: [audience],
+        jwksUri: `${devIssuer.url}/jwks`,
+        identityClaims: ["preferred_username", "email", "sub"],
+        ...(groupsClaim === undefined
+          ? {}
+          : {
+              access: {
+                allowedSubjects: [],
+                allowedEmails: [],
+                requiredGroups: [],
+                groupsClaim,
+                allowedClientIds: [],
+              },
+            }),
+      });
+      const authenticator = createAuthenticator({
+        verifier,
+        resourceMetadataUrl: "http://localhost:8080/.well-known/oauth-protected-resource/mcp",
+        scopeNames,
+      });
+      const token = await devIssuer.mintToken({ scope: "okf:read", claims });
+      const result = await authenticator.authenticate(`Bearer ${token}`);
+      if (!result.ok) expect.unreachable("expected authentication to succeed");
+      return result.principal.groups;
+    }
+
+    it("reads an array claim, dropping non-string entries", async () => {
+      expect(await groupsFor({ groups: ["support", 7, "sales"] })).toEqual(["support", "sales"]);
+    });
+
+    it("reads a string claim as one group", async () => {
+      expect(await groupsFor({ groups: "support" })).toEqual(["support"]);
+    });
+
+    it("is empty when the claim is missing or not a string or array", async () => {
+      expect(await groupsFor({})).toEqual([]);
+      expect(await groupsFor({ groups: { team: "support" } })).toEqual([]);
+    });
+
+    it("reads the configured groups claim name and ignores the default one", async () => {
+      expect(await groupsFor({ roles: ["marketing"], groups: ["support"] }, "roles")).toEqual(["marketing"]);
+    });
+
+    it("is empty when AuthInfo carries no groups (AUTH_MODE=none)", () => {
+      const p = principalFromAuthInfo(
+        { token: "", clientId: "anonymous", scopes: ["okf:admin"], extra: { sub: "anonymous", identity: null } },
+        scopeNames,
+      );
+      expect(p.groups).toEqual([]);
+    });
+  });
+
   describe("principalFromAuthInfo hierarchy", () => {
     const baseInfo = {
       token: "tok",
