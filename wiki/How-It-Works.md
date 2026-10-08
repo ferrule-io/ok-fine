@@ -42,6 +42,11 @@ generated: { by: claude-code/claude-opus-4-5, at: 2026-10-05T12:00:00Z }
 One row per order.[^schema-doc] Joined with [customers](/tables/customers.md) on `customer_id`.
 ```
 
+# Links
+
+- **Intra-bundle links:** Standard OKF bundle-absolute or relative links, e.g. `[customers](/tables/customers.md)` or `[orders](orders.md)`. Targets must end in `.md`.
+- **Cross-project links:** Use the `okf://<project>/<id>` URI scheme (optionally with trailing `.md` and `#fragment`), e.g. `[tier](okf://org/glossary/tier)` or `[sla](okf://org/policies/sla#p1)`. Cross-project links are an ok-fine extension that other OKF readers ignore safely. The server indexes inbound links across projects, resolves them in `read_concept` and the web UI, and warns on missing targets during linting (without rejecting the write).
+
 Only `type` is required. Unknown frontmatter keys and unknown types are preserved. The server manages two keys:
 
 - `generated` is stamped on every write with the writing actor and time.

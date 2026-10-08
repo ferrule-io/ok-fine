@@ -41,6 +41,35 @@ describe("renderConceptMarkdown security", () => {
     expect(rendered.html).toContain('rel="noopener noreferrer"');
   });
 
+  it("renders cross-project links in Markdown with data-okf-project and UI route", () => {
+    const rendered = renderConceptMarkdown("See [Tier Policy](okf://org/glossary/tier#sec).", {
+      project: "support",
+      conceptId: "guide",
+      title: "Support Guide",
+      sources: [],
+      outbound: [{ project: "org", id: "glossary/tier", exists: true }],
+    });
+
+    expect(rendered.html).toContain('href="/ui/p/org/c/glossary/tier#sec"');
+    expect(rendered.html).toContain("data-okf-internal");
+    expect(rendered.html).toContain('data-okf-concept="glossary/tier"');
+    expect(rendered.html).toContain('data-okf-project="org"');
+    expect(rendered.html).not.toContain("okf-broken");
+
+    // Missing target
+    const renderedMissing = renderConceptMarkdown("See [Missing](okf://org/missing).", {
+      project: "support",
+      conceptId: "guide",
+      title: "Support Guide",
+      sources: [],
+      outbound: [{ project: "org", id: "missing", exists: false }],
+    });
+
+    expect(renderedMissing.html).toContain('href="/ui/p/org/c/missing"');
+    expect(renderedMissing.html).toContain('class="okf-broken"');
+    expect(renderedMissing.html).toContain('title="Missing concept"');
+  });
+
   it("blocks remote image loads and renders a placeholder link", () => {
     const renderedHttp = renderConceptMarkdown("![tracking pixel](https://tracker.com/pixel.png)", dummyCtx);
     expect(renderedHttp.html).not.toContain("<img");

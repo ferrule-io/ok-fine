@@ -152,7 +152,7 @@ export interface ConceptView {
     lastVerifiedAt: string | null;
   } | null;
   links: {
-    outbound: Array<{ id: string; exists: boolean }>;
+    outbound: Array<{ id: string; exists: boolean; project?: string }>;
     inbound: string[];
   };
   issues: LintIssue[];
@@ -568,6 +568,43 @@ export class KnowledgeService {
     };
   }
 
+  /**
+   * Builds the concept's link views (both intra-project and cross-project).
+   * Note for issue #38: access control filtering of unreadable projects will live here.
+   */
+  private buildConceptLinks(
+    project: string,
+    cleanId: string,
+    record: ConceptRecord | null,
+  ): {
+    outbound: Array<{ id: string; exists: boolean; project?: string }>;
+    inbound: string[];
+  } {
+    const outbound: Array<{ id: string; exists: boolean; project?: string }> = [];
+
+    if (record) {
+      for (const targetId of record.outbound) {
+        outbound.push({
+          id: targetId,
+          exists: this.catalog.get(project, targetId) !== undefined,
+        });
+      }
+      for (const target of record.crossProjectOutbound) {
+        // Access control (#38) can filter here if principal cannot read target.project
+        outbound.push({
+          project: target.project,
+          id: target.id,
+          exists: this.catalog.get(target.project, target.id) !== undefined,
+        });
+      }
+    }
+
+    // Inbound links (access control #38 can filter here if principal cannot read source project)
+    const inbound = this.catalog.inbound(project, cleanId);
+
+    return { outbound, inbound };
+  }
+
   async readConcept(project: string, id: string): Promise<ConceptView> {
     const tree = await this.assertProjectExists(project);
     let s = id;
@@ -590,6 +627,8 @@ export class KnowledgeService {
       now: new Date(),
       conceptExists: (targetId: string) => this.catalog.get(project, targetId) !== undefined,
       fileExists: (bundlePath: string) => tree.exists(bundlePath),
+      crossProjectConceptExists: (targetProject: string, targetId: string) =>
+        this.catalog.get(targetProject, targetId) !== undefined,
     };
 
     const issues = [
@@ -607,10 +646,7 @@ export class KnowledgeService {
         frontmatter: null,
         body: text,
         derived: null,
-        links: {
-          outbound: [],
-          inbound: this.catalog.inbound(project, cleanId),
-        },
+        links: this.buildConceptLinks(project, cleanId, null),
         issues,
       };
     }
@@ -625,10 +661,7 @@ export class KnowledgeService {
         frontmatter: null,
         body: split.body,
         derived: null,
-        links: {
-          outbound: [],
-          inbound: this.catalog.inbound(project, cleanId),
-        },
+        links: this.buildConceptLinks(project, cleanId, null),
         issues,
       };
     }
@@ -648,11 +681,6 @@ export class KnowledgeService {
       lastVerifiedAt: record.lastVerifiedAt,
     };
 
-    const outbound = record.outbound.map((target) => ({
-      id: target,
-      exists: this.catalog.get(project, target) !== undefined,
-    }));
-
     return {
       project,
       id: cleanId,
@@ -661,10 +689,7 @@ export class KnowledgeService {
       frontmatter: record.frontmatter,
       body: record.body,
       derived,
-      links: {
-        outbound,
-        inbound: this.catalog.inbound(project, cleanId),
-      },
+      links: this.buildConceptLinks(project, cleanId, record),
       issues,
     };
   }
@@ -915,7 +940,10 @@ export class KnowledgeService {
 
   async lint(project: string): Promise<{ project: string; conformant: boolean; issues: LintIssue[] }> {
     const tree = await this.assertProjectExists(project);
-    const res = await lintBundle(bundleSource(this.storage, project, tree), new Date());
+    const res = await lintBundle(bundleSource(this.storage, project, tree), new Date(), {
+      crossProjectConceptExists: (targetProject: string, targetId: string) =>
+        this.catalog.get(targetProject, targetId) !== undefined,
+    });
     return {
       project,
       conformant: res.conformant,
@@ -1222,6 +1250,8 @@ export class KnowledgeService {
         now: new Date(),
         conceptExists: (id: string) => this.catalog.get(args.project, id) !== undefined,
         fileExists: (bundlePath: string) => tree.exists(bundlePath),
+        crossProjectConceptExists: (targetProject: string, targetId: string) =>
+          this.catalog.get(targetProject, targetId) !== undefined,
       });
 
       resultPayload = {

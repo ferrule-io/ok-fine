@@ -1,11 +1,12 @@
 import { clsx } from "clsx";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router";
-import { conceptUrl } from "../lib/links.js";
+import { conceptUrl, parseCrossProjectTarget } from "../lib/links.js";
 
 export interface OutboundLink {
   id: string;
   exists: boolean;
+  project?: string;
 }
 
 export interface ConnectionsGraphProps {
@@ -150,13 +151,22 @@ export function ConnectionsGraph({ project, conceptId, inbound, outbound, classN
         </g>
 
         {/* Inbound Nodes (Left column, x=36, pill width 68 -> x: 2 to 70) */}
-        {visibleInbound.map((id, i) => {
+        {visibleInbound.map((item, i) => {
           const y = getInboundY(i, visibleInbound.length);
-          const lastSeg = id.split("/").pop() ?? id;
-          const display = lastSeg.length > TRUNCATE_LEN ? `${lastSeg.slice(0, TRUNCATE_LEN - 1)}…` : lastSeg;
+          const cross = parseCrossProjectTarget(item);
+          const targetProject = cross ? cross.project : project;
+          const targetId = cross ? cross.id : item;
+          const isCross = cross !== null;
+          const lastSeg = targetId.split("/").pop() ?? targetId;
+          const label = isCross ? `${cross.project}/${lastSeg}` : lastSeg;
+          const display = label.length > TRUNCATE_LEN ? `${label.slice(0, TRUNCATE_LEN - 1)}…` : label;
           return (
             // biome-ignore lint/a11y/noStaticElementInteractions: SVG interactive graph node
-            <g key={`in-${id}`} className="cursor-pointer" onClick={() => navigate(conceptUrl(project, id))}>
+            <g
+              key={`in-${item}`}
+              className="cursor-pointer"
+              onClick={() => navigate(conceptUrl(targetProject, targetId))}
+            >
               <rect
                 x="2"
                 y={y - 10}
@@ -174,7 +184,7 @@ export function ConnectionsGraph({ project, conceptId, inbound, outbound, classN
               >
                 {display}
               </text>
-              <title>{id}</title>
+              <title>{isCross ? `${targetProject}/${targetId}` : targetId}</title>
             </g>
           );
         })}
@@ -188,18 +198,21 @@ export function ConnectionsGraph({ project, conceptId, inbound, outbound, classN
         {/* Outbound Nodes (Right column, x=244, pill width 68 -> x: 210 to 278) */}
         {visibleOutbound.map((item, i) => {
           const y = getOutboundY(i, visibleOutbound.length);
+          const targetProject = item.project ?? project;
+          const isCross = item.project && item.project !== project;
           const lastSeg = item.id.split("/").pop() ?? item.id;
-          const display = lastSeg.length > TRUNCATE_LEN ? `${lastSeg.slice(0, TRUNCATE_LEN - 1)}…` : lastSeg;
+          const label = isCross ? `${item.project}/${lastSeg}` : lastSeg;
+          const display = label.length > TRUNCATE_LEN ? `${label.slice(0, TRUNCATE_LEN - 1)}…` : label;
           const isClickable = item.exists !== false;
 
           return (
             // biome-ignore lint/a11y/noStaticElementInteractions: SVG interactive graph node
             <g
-              key={`out-${item.id}`}
+              key={`out-${item.project ? `${item.project}/` : ""}${item.id}`}
               className={isClickable ? "cursor-pointer" : "cursor-not-allowed"}
               onClick={() => {
                 if (isClickable) {
-                  navigate(conceptUrl(project, item.id));
+                  navigate(conceptUrl(targetProject, item.id));
                 }
               }}
             >
@@ -230,7 +243,7 @@ export function ConnectionsGraph({ project, conceptId, inbound, outbound, classN
                 {display}
               </text>
               <title>
-                {item.id}
+                {isCross ? `${item.project}/${item.id}` : item.id}
                 {item.exists === false ? " (missing)" : ""}
               </title>
             </g>

@@ -1,9 +1,110 @@
 import { posix } from "node:path";
 import { marked } from "marked";
-import { isReservedName } from "./paths.js";
+import { isReservedName, PROJECT_RE, SEGMENT_RE } from "./paths.js";
 
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 const FOOTNOTE_RE = /\[\^([^\]\s]+)\](?!:)/g;
+export interface CrossProjectLink {
+  project: string;
+  id: string;
+}
+
+export function parseCrossProjectTarget(rawHref: string): CrossProjectLink | null {
+  if (!rawHref) {
+    return null;
+  }
+  let href = rawHref;
+  try {
+    href = decodeURI(href);
+  } catch {
+    // ignore URI decode failures
+  }
+
+  if (href.includes("\\")) {
+    return null;
+  }
+
+  const trimmed = href.trim();
+  if (!trimmed.toLowerCase().startsWith("okf://")) {
+    return null;
+  }
+
+  let withoutHash = trimmed;
+  const hashIdx = withoutHash.indexOf("#");
+  if (hashIdx !== -1) {
+    withoutHash = withoutHash.slice(0, hashIdx);
+  }
+  const queryIdx = withoutHash.indexOf("?");
+  if (queryIdx !== -1) {
+    withoutHash = withoutHash.slice(0, queryIdx);
+  }
+
+  const rest = withoutHash.slice(6);
+  const slashIdx = rest.indexOf("/");
+  if (slashIdx === -1) {
+    return null;
+  }
+
+  const project = rest.slice(0, slashIdx);
+  if (!PROJECT_RE.test(project)) {
+    return null;
+  }
+
+  let target = rest.slice(slashIdx + 1);
+  if (target.endsWith(".md")) {
+    target = target.slice(0, -3);
+  }
+  if (target.length === 0 || target.length > 512) {
+    return null;
+  }
+
+  const segments = target.split("/");
+  if (segments.length > 12) {
+    return null;
+  }
+
+  for (const seg of segments) {
+    if (!SEGMENT_RE.test(seg)) {
+      return null;
+    }
+  }
+
+  const lastSeg = segments[segments.length - 1];
+  if (!lastSeg) {
+    return null;
+  }
+  const lastLower = lastSeg.toLowerCase();
+  if (lastLower === "index" || lastLower === "log") {
+    return null;
+  }
+
+  return { project, id: segments.join("/") };
+}
+
+export function extractCrossProjectLinks(body: string): CrossProjectLink[] {
+  const tokens = marked.lexer(body);
+  const found: CrossProjectLink[] = [];
+  const seen = new Set<string>();
+
+  marked.walkTokens(tokens, (token) => {
+    if (token.type !== "link" || token.raw.startsWith("[^")) {
+      return;
+    }
+
+    const target = parseCrossProjectTarget(token.href);
+    if (!target) {
+      return;
+    }
+
+    const key = `${target.project}/${target.id}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      found.push(target);
+    }
+  });
+
+  return found;
+}
 
 export function extractLinks(body: string, conceptId: string): string[] {
   const tokens = marked.lexer(body);

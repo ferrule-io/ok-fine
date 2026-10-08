@@ -38,7 +38,7 @@ function extractScheme(href: string): string | null {
 }
 
 export type ResolvedHref =
-  | { kind: "concept"; id: string; hash: string }
+  | { kind: "concept"; id: string; hash: string; project?: string }
   | { kind: "file"; path: string; hash: string }
   | { kind: "anchor"; hash: string }
   | { kind: "external"; href: string }
@@ -117,6 +117,75 @@ function posixBasename(path: string): string {
   return path.slice(start, end);
 }
 
+export function parseCrossProjectTarget(href: string): { project: string; id: string } | null {
+  if (!href || href.includes("\\")) {
+    return null;
+  }
+  let decoded = decodeHtmlEntities(href.trim());
+  try {
+    decoded = decodeURI(decoded);
+  } catch {
+    // ignore URI decode failures
+  }
+  if (decoded.includes("\\")) {
+    return null;
+  }
+  if (!decoded.toLowerCase().startsWith("okf://")) {
+    return null;
+  }
+
+  let withoutHash = decoded;
+  const hashIdx = withoutHash.indexOf("#");
+  if (hashIdx !== -1) {
+    withoutHash = withoutHash.slice(0, hashIdx);
+  }
+  const queryIdx = withoutHash.indexOf("?");
+  if (queryIdx !== -1) {
+    withoutHash = withoutHash.slice(0, queryIdx);
+  }
+
+  const rest = withoutHash.slice(6);
+  const slashIdx = rest.indexOf("/");
+  if (slashIdx === -1) {
+    return null;
+  }
+
+  const project = rest.slice(0, slashIdx);
+  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(project)) {
+    return null;
+  }
+
+  let target = rest.slice(slashIdx + 1);
+  if (target.endsWith(".md")) {
+    target = target.slice(0, -3);
+  }
+  if (target.length === 0 || target.length > 512) {
+    return null;
+  }
+
+  const segments = target.split("/");
+  if (segments.length > 12) {
+    return null;
+  }
+
+  for (const seg of segments) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(seg)) {
+      return null;
+    }
+  }
+
+  const lastSeg = segments[segments.length - 1];
+  if (!lastSeg) {
+    return null;
+  }
+  const lastLower = lastSeg.toLowerCase();
+  if (lastLower === "index" || lastLower === "log") {
+    return null;
+  }
+
+  return { project, id: segments.join("/") };
+}
+
 export function resolveHref(href: string, conceptId: string): ResolvedHref {
   if (!href) {
     return { kind: "invalid" };
@@ -124,6 +193,18 @@ export function resolveHref(href: string, conceptId: string): ResolvedHref {
 
   const scheme = extractScheme(href);
   if (scheme !== null) {
+    if (scheme === "okf:") {
+      if (href.includes("\\")) {
+        return { kind: "invalid" };
+      }
+      const target = parseCrossProjectTarget(href);
+      if (!target) {
+        return { kind: "invalid" };
+      }
+      const hashIdx = href.indexOf("#");
+      const hash = hashIdx !== -1 ? href.slice(hashIdx) : "";
+      return { kind: "concept", project: target.project, id: target.id, hash };
+    }
     if (SAFE_EXTERNAL_SCHEMES[scheme]) {
       return { kind: "external", href: href.trim() };
     }

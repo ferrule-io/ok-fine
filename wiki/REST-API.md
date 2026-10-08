@@ -10,7 +10,7 @@ updates or `If-None-Match: *` for create-only PUTs of concepts and files (other 
 | GET | `/projects/:project` | read | summary with type and trust tier counts, routing metadata (`teams`, `domains`, `audience`, `keywords`, `owners`) |
 | DELETE | `/projects/:project` | admin | |
 | GET | `/projects/:project/index` | read | `?path=<dir>` |
-| GET | `/projects/:project/concepts/<id>` | read | JSON; `Accept: text/markdown` returns the raw file |
+| GET | `/projects/:project/concepts/<id>` | read | JSON (includes `links` with cross-project outbound `{ project, id, exists }` and cross-project inbound `okf://<project>/<id>`); `Accept: text/markdown` returns the raw file |
 | PUT | `/projects/:project/concepts/<id>` | write | JSON `{ frontmatter, body, message? }` or a raw `text/markdown` file; 201 when created |
 | DELETE | `/projects/:project/concepts/<id>` | write | |
 | POST | `/projects/:project/verifications` | write | `{ id }` → 201 |

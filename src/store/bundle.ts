@@ -240,6 +240,9 @@ export function planIndexes(
 export async function lintBundle(
   source: BundleSource,
   now: Date,
+  options?: {
+    crossProjectConceptExists?: (project: string, id: string) => boolean;
+  },
 ): Promise<{ conformant: boolean; issues: LintIssue[] }> {
   const issues: LintIssue[] = [];
   const tree = new BundleTree(source.paths);
@@ -250,6 +253,7 @@ export async function lintBundle(
     now,
     conceptExists: (id: string) => conceptIdSet.has(id),
     fileExists: (relPath: string) => allBundleFiles.has(relPath),
+    crossProjectConceptExists: options?.crossProjectConceptExists,
   };
 
   const readText = async (path: string): Promise<string | null> => {
