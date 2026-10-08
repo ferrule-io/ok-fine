@@ -1,5 +1,7 @@
+import { readFileSync } from "node:fs";
 import { isIPv4 } from "node:net";
 import { z } from "zod";
+import { PROJECT_RE } from "./okf/paths.js";
 
 export interface Logger {
   info(objOrMsg: unknown, msg?: string): void;
@@ -47,6 +49,12 @@ export interface StorageConfig {
   maxFileBytes: number;
   maxArchiveBytes: number;
   defaultStaleAfterDays?: number;
+  projectAccess: Record<string, ProjectAccess>;
+}
+
+export interface ProjectAccess {
+  readGroups: string[];
+  writeGroups: string[];
 }
 
 export interface Config extends StorageConfig {
@@ -157,8 +165,108 @@ const storageEnvShape = {
   MAX_FILE_BYTES: intEnv("MAX_FILE_BYTES", "1048576", 1),
   MAX_ARCHIVE_BYTES: intEnv("MAX_ARCHIVE_BYTES", "52428800", 1),
   DEFAULT_STALE_AFTER_DAYS: optionalIntEnv("DEFAULT_STALE_AFTER_DAYS", 1, 36500),
+  PROJECT_ACCESS: z.string().optional(),
+  PROJECT_ACCESS_FILE: z.string().optional(),
 };
 
+const projectAccessRuleSchema = z.object({
+  readGroups: z.array(z.string()).default([]),
+  writeGroups: z.array(z.string()).default([]),
+});
+
+const projectAccessMapSchema = z.record(z.string(), projectAccessRuleSchema);
+
+function refineProjectAccess(
+  data: {
+    PROJECT_ACCESS?: string | undefined;
+    PROJECT_ACCESS_FILE?: string | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (data.PROJECT_ACCESS && data.PROJECT_ACCESS_FILE) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["PROJECT_ACCESS"],
+      message: "PROJECT_ACCESS and PROJECT_ACCESS_FILE cannot both be set",
+    });
+    return;
+  }
+
+  let jsonStr: string | undefined;
+  let targetPath = "PROJECT_ACCESS";
+
+  if (data.PROJECT_ACCESS !== undefined && data.PROJECT_ACCESS.trim() !== "") {
+    jsonStr = data.PROJECT_ACCESS;
+    targetPath = "PROJECT_ACCESS";
+  } else if (data.PROJECT_ACCESS_FILE !== undefined && data.PROJECT_ACCESS_FILE.trim() !== "") {
+    targetPath = "PROJECT_ACCESS_FILE";
+    try {
+      jsonStr = readFileSync(data.PROJECT_ACCESS_FILE, "utf-8");
+    } catch (err) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["PROJECT_ACCESS_FILE"],
+        message: `could not read PROJECT_ACCESS_FILE: ${(err as Error).message}`,
+      });
+      return;
+    }
+  }
+
+  if (jsonStr === undefined) return;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    ctx.addIssue({
+      code: "custom",
+      path: [targetPath],
+      message: `${targetPath} must be valid JSON`,
+    });
+    return;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    ctx.addIssue({
+      code: "custom",
+      path: [targetPath],
+      message: `${targetPath} must be a JSON object`,
+    });
+    return;
+  }
+
+  for (const key of Object.keys(parsed)) {
+    if (!PROJECT_RE.test(key)) {
+      ctx.addIssue({
+        code: "custom",
+        path: [targetPath, key],
+        message: `invalid project name "${key}": must match ${PROJECT_RE}`,
+      });
+    }
+  }
+
+  const result = projectAccessMapSchema.safeParse(parsed);
+  if (!result.success) {
+    for (const issue of result.error.issues) {
+      ctx.addIssue({
+        code: "custom",
+        path: [targetPath, ...issue.path],
+        message: issue.message,
+      });
+    }
+  }
+}
+
+function parseProjectAccess(projectAccess?: string, projectAccessFile?: string): Record<string, ProjectAccess> {
+  let jsonStr: string | undefined;
+  if (projectAccess !== undefined && projectAccess.trim() !== "") {
+    jsonStr = projectAccess;
+  } else if (projectAccessFile !== undefined && projectAccessFile.trim() !== "") {
+    jsonStr = readFileSync(projectAccessFile, "utf-8");
+  }
+  if (!jsonStr) return {};
+  const parsed = JSON.parse(jsonStr);
+  return projectAccessMapSchema.parse(parsed);
+}
 const httpEnvShape = {
   AUTH_MODE: z.enum(["oidc", "none"], "AUTH_MODE must be oidc or none").default("oidc"),
   PORT: intEnv("PORT", "8080", 0, 65535),
@@ -237,6 +345,7 @@ const rawEnvSchema = z.object({ ...httpEnvShape, ...storageEnvShape }).superRefi
   (data, ctx) => {
     if (!data || typeof data !== "object") return;
     refineGitCredentials(data, ctx);
+    refineProjectAccess(data, ctx);
     if (data.AUTH_MODE === "none") {
       const isLoopback = isLoopbackHost(data.HOST ?? "0.0.0.0");
       const allowUnauthenticated = data.ALLOW_UNAUTHENTICATED_NETWORK === "true";
@@ -312,7 +421,10 @@ const rawEnvSchema = z.object({ ...httpEnvShape, ...storageEnvShape }).superRefi
   { when: () => true },
 );
 
-const storageEnvSchema = z.object(storageEnvShape).superRefine(refineGitCredentials, { when: () => true });
+const storageEnvSchema = z
+  .object(storageEnvShape)
+  .superRefine(refineGitCredentials, { when: () => true })
+  .superRefine(refineProjectAccess, { when: () => true });
 
 function formatConfigError(error: z.ZodError): Error {
   const errorMessages = error.issues.map((issue) => `${issue.path.join(".") || "config"}: ${issue.message}`);
@@ -343,6 +455,7 @@ function storageFromRaw(
     maxFileBytes: raw.MAX_FILE_BYTES,
     maxArchiveBytes: raw.MAX_ARCHIVE_BYTES,
     defaultStaleAfterDays: raw.DEFAULT_STALE_AFTER_DAYS,
+    projectAccess: parseProjectAccess(raw.PROJECT_ACCESS, raw.PROJECT_ACCESS_FILE),
   };
 }
 

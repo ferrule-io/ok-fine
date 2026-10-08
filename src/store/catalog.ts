@@ -13,6 +13,7 @@ export interface SearchParams {
   trustTier?: TrustTier;
   stale?: boolean;
   limit?: number;
+  allowedProjects?: (project: string) => boolean;
 }
 
 export interface SearchHit {
@@ -136,19 +137,57 @@ export class Catalog {
   removeProject(project: string): void {
     const pMap = this.projectRecords.get(project);
     if (pMap) {
-      for (const id of pMap.keys()) {
-        const key = `${project}/${id}`;
+      for (const record of pMap.values()) {
+        const key = `${project}/${record.id}`;
         if (this.miniSearch.has(key)) {
           this.miniSearch.discard(key);
+        }
+        for (const target of record.outbound) {
+          this.removeInboundLink(project, record.id, project, target);
+        }
+        for (const target of record.crossProjectOutbound) {
+          this.removeInboundLink(project, record.id, target.project, target.id);
         }
       }
       this.projectRecords.delete(project);
     }
-    this.inboundLinks.delete(project);
+    const pInbound = this.inboundLinks.get(project);
+    if (pInbound && pInbound.size === 0) {
+      this.inboundLinks.delete(project);
+    }
   }
 
   upsert(record: ConceptRecord): void {
     this.storeRecord(record);
+  }
+
+  private addInboundLink(sourceProject: string, sourceId: string, targetProject: string, targetId: string): void {
+    let pInbound = this.inboundLinks.get(targetProject);
+    if (!pInbound) {
+      pInbound = new Map();
+      this.inboundLinks.set(targetProject, pInbound);
+    }
+    let sources = pInbound.get(targetId);
+    if (!sources) {
+      sources = new Set();
+      pInbound.set(targetId, sources);
+    }
+    sources.add(sourceProject === targetProject ? sourceId : `okf://${sourceProject}/${sourceId}`);
+  }
+
+  private removeInboundLink(sourceProject: string, sourceId: string, targetProject: string, targetId: string): void {
+    const pInbound = this.inboundLinks.get(targetProject);
+    if (!pInbound) {
+      return;
+    }
+    const sources = pInbound.get(targetId);
+    if (!sources) {
+      return;
+    }
+    sources.delete(sourceProject === targetProject ? sourceId : `okf://${sourceProject}/${sourceId}`);
+    if (sources.size === 0) {
+      pInbound.delete(targetId);
+    }
   }
 
   private storeRecord(record: ConceptRecord): void {
@@ -160,30 +199,24 @@ export class Catalog {
       this.projectRecords.set(project, pMap);
     }
 
-    let pInbound = this.inboundLinks.get(project);
-    if (!pInbound) {
-      pInbound = new Map();
-      this.inboundLinks.set(project, pInbound);
-    }
-
     const prev = pMap.get(id);
     if (prev) {
       for (const target of prev.outbound) {
-        pInbound.get(target)?.delete(id);
+        this.removeInboundLink(project, id, project, target);
+      }
+      for (const target of prev.crossProjectOutbound) {
+        this.removeInboundLink(project, id, target.project, target.id);
       }
     }
 
     pMap.set(id, record);
 
     for (const target of record.outbound) {
-      let sources = pInbound.get(target);
-      if (!sources) {
-        sources = new Set();
-        pInbound.set(target, sources);
-      }
-      sources.add(id);
+      this.addInboundLink(project, id, project, target);
     }
-
+    for (const target of record.crossProjectOutbound) {
+      this.addInboundLink(project, id, target.project, target.id);
+    }
     const key = `${project}/${id}`;
     if (record.parseError) {
       if (this.miniSearch.has(key)) {
@@ -219,16 +252,15 @@ export class Catalog {
     if (pMap) {
       const prev = pMap.get(id);
       if (prev) {
-        const pInbound = this.inboundLinks.get(project);
-        if (pInbound) {
-          for (const target of prev.outbound) {
-            pInbound.get(target)?.delete(id);
-          }
+        for (const target of prev.outbound) {
+          this.removeInboundLink(project, id, project, target);
+        }
+        for (const target of prev.crossProjectOutbound) {
+          this.removeInboundLink(project, id, target.project, target.id);
         }
       }
       pMap.delete(id);
     }
-
     const key = `${project}/${id}`;
     if (this.miniSearch.has(key)) {
       this.miniSearch.discard(key);
@@ -262,6 +294,9 @@ export class Catalog {
 
     const matchesFilter = (record: ConceptRecord): boolean => {
       if (record.parseError) {
+        return false;
+      }
+      if (params.allowedProjects && !params.allowedProjects(record.project)) {
         return false;
       }
       if (params.project && record.project !== params.project) {
@@ -343,7 +378,9 @@ export class Catalog {
       return results.slice(0, limit);
     } else {
       const results: SearchHit[] = [];
-      const projectList = params.project ? [params.project] : this.projects();
+      const projectList = (params.project ? [params.project] : this.projects()).filter(
+        (p) => !params.allowedProjects || params.allowedProjects(p),
+      );
 
       for (const p of projectList) {
         const pRecords = this.records(p);

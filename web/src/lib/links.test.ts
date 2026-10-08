@@ -120,4 +120,60 @@ describe("links", () => {
     expect(fileUrl("demo", "refs/schema.json")).toBe("/p/demo/f/refs/schema.json");
     expect(fileUrl("demo", "/refs/schema.json")).toBe("/p/demo/f/refs/schema.json");
   });
+
+  it("resolves okf:// cross-project concept links", () => {
+    expect(resolveHref("okf://org/glossary/tier", "a/b")).toEqual({
+      kind: "concept",
+      project: "org",
+      id: "glossary/tier",
+      hash: "",
+    });
+    expect(resolveHref("okf://org/glossary/tier.md#section", "a/b")).toEqual({
+      kind: "concept",
+      project: "org",
+      id: "glossary/tier",
+      hash: "#section",
+    });
+    expect(resolveHref("okf://org/glossary/tier?ref=1#section", "a/b")).toEqual({
+      kind: "concept",
+      project: "org",
+      id: "glossary/tier",
+      hash: "#section",
+    });
+    expect(resolveHref("okf://org/tier", "a/b")).toEqual({
+      kind: "concept",
+      project: "org",
+      id: "tier",
+      hash: "",
+    });
+    expect(resolveHref("okf://org/tier.md", "a/b")).toEqual({
+      kind: "concept",
+      project: "org",
+      id: "tier",
+      hash: "",
+    });
+  });
+
+  it("rejects invalid okf:// cross-project links as invalid", () => {
+    const invalidCrossProject = [
+      "okf://org/../tier",
+      "okf://org/tier/..",
+      "okf://../tier",
+      "okf://Org/tier",
+      "okf://-org/tier",
+      "okf://org_name/tier",
+      "okf://org//tier",
+      "okf://org/tier/",
+      "okf://org/index",
+      "okf://org/index.md",
+      "okf://org/log",
+      "okf://org/log.md",
+      "okf://org/sub/log",
+      "okf://org\\tier",
+    ];
+
+    for (const href of invalidCrossProject) {
+      expect(resolveHref(href, "a/b")).toEqual({ kind: "invalid" });
+    }
+  });
 });

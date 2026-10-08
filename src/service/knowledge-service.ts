@@ -152,7 +152,7 @@ export interface ConceptView {
     lastVerifiedAt: string | null;
   } | null;
   links: {
-    outbound: Array<{ id: string; exists: boolean }>;
+    outbound: Array<{ id: string; exists: boolean; project?: string }>;
     inbound: string[];
   };
   issues: LintIssue[];
@@ -327,15 +327,42 @@ export class KnowledgeService {
     await tx.writeFile(project, "log.md", prependLogEntry(existing, nowIso().slice(0, 10), entry));
   }
 
-  private async assertProjectExists(project: string, forWrite = false): Promise<BundleTree> {
+  canReadProject(p: Principal, project: string): boolean {
+    if (p.canAdmin) return true;
+    const access = this.config.projectAccess[project];
+    if (!access || access.readGroups.length === 0) return true;
+    return access.readGroups.some((g) => p.groups.includes(g));
+  }
+
+  canWriteProject(p: Principal, project: string): boolean {
+    if (p.canAdmin) return true;
+    if (!this.canReadProject(p, project)) return false;
+    const access = this.config.projectAccess[project];
+    if (!access || access.writeGroups.length === 0) return true;
+    return access.writeGroups.some((g) => p.groups.includes(g));
+  }
+
+  private async assertReadable(p: Principal, project: string, forWrite = false): Promise<BundleTree> {
     // Every project-scoped path is built from this name; PROJECT_RE forbids `.`, `..`, and `/`.
     if (!PROJECT_RE.test(project)) {
       throw new OkfError("invalid_id", 400, `invalid project name "${project}"`);
+    }
+    if (!this.canReadProject(p, project)) {
+      const msg = forWrite ? "call create_project first" : `project "${project}" not found`;
+      throw new OkfError("project_not_found", 404, msg);
     }
     const tree = await this.storage.tree(project);
     if (tree.isEmpty) {
       const msg = forWrite ? "call create_project first" : `project "${project}" not found`;
       throw new OkfError("project_not_found", 404, msg);
+    }
+    return tree;
+  }
+
+  private async assertWritable(p: Principal, project: string): Promise<BundleTree> {
+    const tree = await this.assertReadable(p, project, true);
+    if (!this.canWriteProject(p, project)) {
+      throw new OkfError("forbidden", 403, `not permitted to write to project "${project}"`);
     }
     return tree;
   }
@@ -368,7 +395,10 @@ export class KnowledgeService {
     return out;
   }
 
-  listProjects(filter: { repository?: string; team?: string; query?: string } = {}): {
+  listProjects(
+    p: Principal,
+    filter: { repository?: string; team?: string; query?: string } = {},
+  ): {
     projects: ProjectSummary[];
   } {
     let wantedRepository: string | null = null;
@@ -395,6 +425,9 @@ export class KnowledgeService {
     const summaries: ProjectSummary[] = [];
 
     for (const project of projects) {
+      if (!this.canReadProject(p, project)) {
+        continue;
+      }
       const overview = this.catalog.get(project, "overview");
       const frontmatter = overview?.frontmatter;
 
@@ -463,8 +496,8 @@ export class KnowledgeService {
     return { projects: summaries };
   }
 
-  async getProject(project: string): Promise<ProjectDetails> {
-    await this.assertProjectExists(project);
+  async getProject(p: Principal, project: string): Promise<ProjectDetails> {
+    await this.assertReadable(p, project);
     const records = this.catalog.records(project);
     const overview = this.catalog.get(project, "overview");
     const frontmatter = overview?.frontmatter;
@@ -514,10 +547,11 @@ export class KnowledgeService {
   }
 
   async getIndex(
+    p: Principal,
     project: string,
     dir = "",
   ): Promise<{ project: string; path: string; markdown: string; entries: IndexEntry[] }> {
-    const tree = await this.assertProjectExists(project);
+    const tree = await this.assertReadable(p, project);
 
     let cleanDir = "";
     if (dir && dir !== "/" && dir !== ".") {
@@ -568,8 +602,51 @@ export class KnowledgeService {
     };
   }
 
-  async readConcept(project: string, id: string): Promise<ConceptView> {
-    const tree = await this.assertProjectExists(project);
+  /**
+   * Builds the concept's link views (both intra-project and cross-project).
+   */
+  private buildConceptLinks(
+    p: Principal,
+    project: string,
+    cleanId: string,
+    record: ConceptRecord | null,
+  ): {
+    outbound: Array<{ id: string; exists: boolean; project?: string }>;
+    inbound: string[];
+  } {
+    const outbound: Array<{ id: string; exists: boolean; project?: string }> = [];
+
+    if (record) {
+      for (const targetId of record.outbound) {
+        outbound.push({
+          id: targetId,
+          exists: this.catalog.get(project, targetId) !== undefined,
+        });
+      }
+      for (const target of record.crossProjectOutbound) {
+        const canRead = this.canReadProject(p, target.project);
+        outbound.push({
+          project: target.project,
+          id: target.id,
+          exists: canRead && this.catalog.get(target.project, target.id) !== undefined,
+        });
+      }
+    }
+
+    // Inbound links (omitting okf:// links from unreadable projects)
+    const inbound = this.catalog.inbound(project, cleanId).filter((link) => {
+      if (link.startsWith("okf://")) {
+        const sourceProject = link.slice(6).split("/")[0];
+        if (sourceProject && !this.canReadProject(p, sourceProject)) return false;
+      }
+      return true;
+    });
+
+    return { outbound, inbound };
+  }
+
+  async readConcept(p: Principal, project: string, id: string): Promise<ConceptView> {
+    const tree = await this.assertReadable(p, project);
     let s = id;
     if (s.startsWith("/")) {
       s = s.slice(1);
@@ -590,6 +667,8 @@ export class KnowledgeService {
       now: new Date(),
       conceptExists: (targetId: string) => this.catalog.get(project, targetId) !== undefined,
       fileExists: (bundlePath: string) => tree.exists(bundlePath),
+      crossProjectConceptExists: (targetProject: string, targetId: string) =>
+        this.canReadProject(p, targetProject) && this.catalog.get(targetProject, targetId) !== undefined,
     };
 
     const issues = [
@@ -607,10 +686,7 @@ export class KnowledgeService {
         frontmatter: null,
         body: text,
         derived: null,
-        links: {
-          outbound: [],
-          inbound: this.catalog.inbound(project, cleanId),
-        },
+        links: this.buildConceptLinks(p, project, cleanId, null),
         issues,
       };
     }
@@ -625,10 +701,7 @@ export class KnowledgeService {
         frontmatter: null,
         body: split.body,
         derived: null,
-        links: {
-          outbound: [],
-          inbound: this.catalog.inbound(project, cleanId),
-        },
+        links: this.buildConceptLinks(p, project, cleanId, null),
         issues,
       };
     }
@@ -648,11 +721,6 @@ export class KnowledgeService {
       lastVerifiedAt: record.lastVerifiedAt,
     };
 
-    const outbound = record.outbound.map((target) => ({
-      id: target,
-      exists: this.catalog.get(project, target) !== undefined,
-    }));
-
     return {
       project,
       id: cleanId,
@@ -661,19 +729,21 @@ export class KnowledgeService {
       frontmatter: record.frontmatter,
       body: record.body,
       derived,
-      links: {
-        outbound,
-        inbound: this.catalog.inbound(project, cleanId),
-      },
+      links: this.buildConceptLinks(p, project, cleanId, record),
       issues,
     };
   }
 
-  async search(params: SearchParams): Promise<{ results: SearchHit[] }> {
+  async search(p: Principal, params: SearchParams): Promise<{ results: SearchHit[] }> {
     if (params.project) {
-      await this.assertProjectExists(params.project);
+      await this.assertReadable(p, params.project);
     }
-    return { results: this.catalog.search(params) };
+    return {
+      results: this.catalog.search({
+        ...params,
+        allowedProjects: (project) => this.canReadProject(p, project),
+      }),
+    };
   }
 
   async orient(p: Principal, args: OrientParams): Promise<OrientResult> {
@@ -685,7 +755,7 @@ export class KnowledgeService {
       throw new OkfError("bad_request", 400, "question must be at most 512 characters");
     }
     if (args.project) {
-      await this.assertProjectExists(args.project);
+      await this.assertReadable(p, args.project);
     }
 
     const projectLimit = Math.max(1, Math.min(50, typeof args.limit === "number" ? args.limit : 5));
@@ -696,7 +766,7 @@ export class KnowledgeService {
     const questionTerms = tokenizeQuery(question);
     const meaningfulTerms = questionTerms.filter((q) => q.length >= 3);
 
-    const allProjects = this.catalog.projects();
+    const allProjects = this.catalog.projects().filter((proj) => this.canReadProject(p, proj));
     const hubExists = allProjects.includes(hubProjectName);
     // A project filter narrows the search, but the hub project is still listed (after the requested one).
     const candidateProjects = args.project
@@ -709,6 +779,7 @@ export class KnowledgeService {
       query: question,
       project: args.project,
       limit: 100,
+      allowedProjects: (proj) => this.canReadProject(p, proj),
     });
 
     const projectConceptHits = new Map<string, SearchHit[]>();
@@ -867,8 +938,8 @@ export class KnowledgeService {
     };
   }
 
-  async history(project: string, id?: string, limit = 20): Promise<{ commits: HistoryEntry[] }> {
-    await this.assertProjectExists(project);
+  async history(p: Principal, project: string, id?: string, limit = 20): Promise<{ commits: HistoryEntry[] }> {
+    await this.assertReadable(p, project);
 
     let path: string | null = null;
     if (id) {
@@ -887,10 +958,11 @@ export class KnowledgeService {
   }
 
   async readFile(
+    p: Principal,
     project: string,
     path: string,
   ): Promise<{ project: string; path: string; revision: string; content: string }> {
-    await this.assertProjectExists(project);
+    await this.assertReadable(p, project);
     const cleanPath = resolveReadPath(path);
     const buf = await this.storage.readFile(project, cleanPath);
     if (buf === null) {
@@ -913,9 +985,12 @@ export class KnowledgeService {
     };
   }
 
-  async lint(project: string): Promise<{ project: string; conformant: boolean; issues: LintIssue[] }> {
-    const tree = await this.assertProjectExists(project);
-    const res = await lintBundle(bundleSource(this.storage, project, tree), new Date());
+  async lint(p: Principal, project: string): Promise<{ project: string; conformant: boolean; issues: LintIssue[] }> {
+    const tree = await this.assertReadable(p, project);
+    const res = await lintBundle(bundleSource(this.storage, project, tree), new Date(), {
+      crossProjectConceptExists: (targetProject: string, targetId: string) =>
+        this.canReadProject(p, targetProject) && this.catalog.get(targetProject, targetId) !== undefined,
+    });
     return {
       project,
       conformant: res.conformant,
@@ -951,9 +1026,12 @@ export class KnowledgeService {
   }
 
   /** Conflicts outlive their project: a preserved write may be the one that created it. */
-  private async conflictsOf(project: string): Promise<Conflict[]> {
+  private async conflictsOf(p: Principal, project: string): Promise<Conflict[]> {
     if (!PROJECT_RE.test(project)) {
       throw new OkfError("invalid_id", 400, `invalid project name "${project}"`);
+    }
+    if (!this.canReadProject(p, project)) {
+      throw new OkfError("project_not_found", 404, `project "${project}" not found`);
     }
     const conflicts = await this.storage.conflicts(project);
     if (conflicts.length === 0 && (await this.storage.tree(project)).isEmpty) {
@@ -962,11 +1040,12 @@ export class KnowledgeService {
     return conflicts;
   }
 
-  async listConflicts(project: string): Promise<{ project: string; conflicts: Conflict[] }> {
-    return { project, conflicts: await this.conflictsOf(project) };
+  async listConflicts(p: Principal, project: string): Promise<{ project: string; conflicts: Conflict[] }> {
+    return { project, conflicts: await this.conflictsOf(p, project) };
   }
 
   async readConflict(
+    p: Principal,
     project: string,
     id: string,
     path: string,
@@ -978,9 +1057,10 @@ export class KnowledgeService {
     base: string | null;
     current: { revision: string; content: string } | null;
   }> {
-    if (!(await this.conflictsOf(project)).some((c) => c.id === id)) {
+    if (!(await this.conflictsOf(p, project)).some((c) => c.id === id)) {
       throw new OkfError("not_found", 404, `conflict "${id}" not found in project "${project}"`);
     }
+
     const cleanPath = resolveReadPath(path);
     const text = (buf: Buffer | null): string | null => {
       if (buf === null) return null;
@@ -1010,7 +1090,10 @@ export class KnowledgeService {
     args: { project: string; id: string; paths: string[]; actor: string; message?: string },
   ): Promise<{ project: string; id: string; commit: string | null; pushed: boolean | null; warnings: string[] }> {
     checkActor(args.actor, p);
-    await this.conflictsOf(args.project);
+    await this.conflictsOf(p, args.project);
+    if (!this.canWriteProject(p, args.project)) {
+      throw new OkfError("forbidden", 403, `not permitted to write to project "${args.project}"`);
+    }
 
     const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
       const conflict = (await this.storage.conflicts(args.project)).find((c) => c.id === args.id);
@@ -1059,6 +1142,13 @@ export class KnowledgeService {
     }
     if (!args.title || args.title.trim().length === 0 || args.title.length > 200) {
       throw new OkfError("bad_request", 400, "project title must be between 1 and 200 characters");
+    }
+
+    if (!this.canReadProject(p, args.project)) {
+      throw new OkfError("project_not_found", 404, "call create_project first");
+    }
+    if (!this.canWriteProject(p, args.project)) {
+      throw new OkfError("forbidden", 403, `not permitted to write to project "${args.project}"`);
     }
 
     if (!(await this.storage.tree(args.project)).isEmpty) {
@@ -1123,7 +1213,7 @@ export class KnowledgeService {
     },
   ): Promise<WriteConceptResult> {
     checkActor(args.actor, p);
-    await this.assertProjectExists(args.project, true);
+    await this.assertWritable(p, args.project);
     const cleanId = normalizeConceptIdForWrite(args.id);
 
     if (!args.frontmatter || typeof args.frontmatter !== "object" || Array.isArray(args.frontmatter)) {
@@ -1222,6 +1312,8 @@ export class KnowledgeService {
         now: new Date(),
         conceptExists: (id: string) => this.catalog.get(args.project, id) !== undefined,
         fileExists: (bundlePath: string) => tree.exists(bundlePath),
+        crossProjectConceptExists: (targetProject: string, targetId: string) =>
+          this.catalog.get(targetProject, targetId) !== undefined,
       });
 
       resultPayload = {
@@ -1262,7 +1354,7 @@ export class KnowledgeService {
     args: { project: string; id: string; actor: string; expectedRevision?: string },
   ): Promise<VerifyConceptResult> {
     checkActor(args.actor, p);
-    await this.assertProjectExists(args.project, true);
+    await this.assertWritable(p, args.project);
 
     let s = args.id;
     if (s.startsWith("/")) {
@@ -1341,7 +1433,7 @@ export class KnowledgeService {
     args: { project: string; id: string; actor: string; expectedRevision?: string },
   ): Promise<DeleteConceptResult> {
     checkActor(args.actor, p);
-    await this.assertProjectExists(args.project, true);
+    await this.assertWritable(p, args.project);
 
     let s = args.id;
     if (s.startsWith("/")) {
@@ -1409,7 +1501,7 @@ export class KnowledgeService {
     },
   ): Promise<WriteFileResult> {
     checkActor(args.actor, p);
-    await this.assertProjectExists(args.project, true);
+    await this.assertWritable(p, args.project);
     const cleanPath = normalizeFilePathForWrite(args.path);
 
     let newRev!: string;
@@ -1472,7 +1564,7 @@ export class KnowledgeService {
     args: { project: string; path: string; actor: string; expectedRevision?: string | null },
   ): Promise<DeleteFileResult> {
     checkActor(args.actor, p);
-    await this.assertProjectExists(args.project, true);
+    await this.assertWritable(p, args.project);
     const cleanPath = normalizeFilePathForWrite(args.path);
 
     const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
@@ -1523,7 +1615,7 @@ export class KnowledgeService {
     args: { project: string; actor: string },
   ): Promise<{ project: string; commit: string | null; pushed: boolean | null; warnings: string[] }> {
     checkActor(args.actor, p);
-    await this.assertProjectExists(args.project, true);
+    await this.assertWritable(p, args.project);
 
     const txRes = await this.storage.transaction({ projects: [args.project] }, async (tx) => {
       await tx.deleteProject(args.project);
@@ -1547,8 +1639,8 @@ export class KnowledgeService {
     };
   }
 
-  exportArchive(project: string): Readable {
-    if (!PROJECT_RE.test(project) || !this.catalog.projects().includes(project)) {
+  exportArchive(p: Principal, project: string): Readable {
+    if (!PROJECT_RE.test(project) || !this.canReadProject(p, project) || !this.catalog.projects().includes(project)) {
       throw new OkfError("project_not_found", 404, `project "${project}" not found`);
     }
     return this.storage.archive(project);
@@ -1568,6 +1660,16 @@ export class KnowledgeService {
 
     if (!PROJECT_RE.test(args.project)) {
       throw new OkfError("invalid_id", 400, `invalid project name "${args.project}"`);
+    }
+    if (!(await this.storage.tree(args.project)).isEmpty) {
+      await this.assertWritable(p, args.project);
+    } else {
+      if (!this.canReadProject(p, args.project)) {
+        throw new OkfError("project_not_found", 404, "call create_project first");
+      }
+      if (!this.canWriteProject(p, args.project)) {
+        throw new OkfError("forbidden", 403, `not permitted to write to project "${args.project}"`);
+      }
     }
 
     if (args.archive.length > this.config.maxArchiveBytes) {

@@ -36,6 +36,7 @@ For non-coding teams (such as support, sales, marketing, and operations) using C
 - **Team projects:** One project per team (e.g. `support`, `sales`, `marketing`) holding team-specific playbooks, processes, FAQs, templates, and domain knowledge.
 - **Process projects:** A separate process project only when several teams genuinely share a single cross-functional process.
 - **Project identifiers:** Project names must match `^[a-z0-9][a-z0-9-]{0,62}$`.
+- **Access control:** By default, projects are open to all authenticated users. Restricted departments (such as HR, Finance, or Legal) can restrict read and write access by IdP groups via server configuration (`PROJECT_ACCESS`). Access rules are administered centrally on the server, never in concept frontmatter. For hard isolation, deploy a dedicated instance with its own git remote.
 
 ## The onboarding interview
 

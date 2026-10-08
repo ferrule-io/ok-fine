@@ -34,7 +34,7 @@ DOMPurify.addHook("afterSanitizeAttributes", (node) => {
 
 export function sanitizeMarkdownHtml(rawHtml: string): string {
   return DOMPurify.sanitize(rawHtml, {
-    ADD_ATTR: ["target", "data-okf-cite", "data-okf-internal", "data-okf-concept"],
+    ADD_ATTR: ["target", "data-okf-cite", "data-okf-internal", "data-okf-concept", "data-okf-project"],
     FORBID_TAGS: [
       "style",
       "form",
@@ -58,7 +58,7 @@ export interface RenderContext {
   conceptId: string;
   title: string;
   sources: SourceRef[];
-  outbound: Array<{ id: string; exists: boolean }>;
+  outbound: Array<{ id: string; exists: boolean; project?: string }>;
 }
 
 export interface RenderedMarkdown {
@@ -147,8 +147,12 @@ export function renderConceptMarkdown(body: string, ctx: RenderContext): Rendere
               return `<sup class="okf-cite"><a href="${escapeHtml(resolved.href)}" target="_blank" rel="noopener noreferrer">${n}</a></sup>`;
             }
             if (resolved.kind === "concept") {
-              const url = `/ui${conceptUrl(ctx.project, resolved.id)}${resolved.hash}`;
-              return `<sup class="okf-cite"><a href="${escapeHtml(url)}" data-okf-internal data-okf-concept="${escapeHtml(resolved.id)}">${n}</a></sup>`;
+              const targetProject = resolved.project ?? ctx.project;
+              const crossProject =
+                resolved.project !== undefined && resolved.project !== ctx.project ? resolved.project : null;
+              const projectAttr = crossProject ? ` data-okf-project="${escapeHtml(crossProject)}"` : "";
+              const url = `/ui${conceptUrl(targetProject, resolved.id)}${resolved.hash}`;
+              return `<sup class="okf-cite"><a href="${escapeHtml(url)}" data-okf-internal data-okf-concept="${escapeHtml(resolved.id)}"${projectAttr}>${n}</a></sup>`;
             }
             return `<sup class="okf-cite"><span class="okf-cite-missing" title="Invalid source">${n}</span></sup>`;
           }
@@ -193,16 +197,22 @@ export function renderConceptMarkdown(body: string, ctx: RenderContext): Rendere
         const resolved = resolveHref(href, ctx.conceptId);
 
         if (resolved.kind === "concept") {
-          const outboundEntry = ctx.outbound.find((o) => o.id === resolved.id);
+          const targetProject = resolved.project ?? ctx.project;
+          const crossProject =
+            resolved.project !== undefined && resolved.project !== ctx.project ? resolved.project : null;
+          const outboundEntry = ctx.outbound.find(
+            (o) => (o.project ? o.project === targetProject : targetProject === ctx.project) && o.id === resolved.id,
+          );
           const exists = outboundEntry ? outboundEntry.exists : true;
-          const url = `/ui${conceptUrl(ctx.project, resolved.id)}${resolved.hash}`;
+          const url = `/ui${conceptUrl(targetProject, resolved.id)}${resolved.hash}`;
           const escapedUrl = escapeHtml(url);
           const escapedId = escapeHtml(resolved.id);
+          const projectAttr = crossProject ? ` data-okf-project="${escapeHtml(crossProject)}"` : "";
 
           if (!exists) {
-            return `<a href="${escapedUrl}" data-okf-internal data-okf-concept="${escapedId}" class="okf-broken" title="Missing concept">${text}</a>`;
+            return `<a href="${escapedUrl}" data-okf-internal data-okf-concept="${escapedId}"${projectAttr} class="okf-broken" title="Missing concept">${text}</a>`;
           }
-          return `<a href="${escapedUrl}" data-okf-internal data-okf-concept="${escapedId}"${titleAttr}>${text}</a>`;
+          return `<a href="${escapedUrl}" data-okf-internal data-okf-concept="${escapedId}"${projectAttr}${titleAttr}>${text}</a>`;
         }
 
         if (resolved.kind === "file") {

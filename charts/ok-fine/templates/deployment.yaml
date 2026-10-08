@@ -149,6 +149,10 @@ spec:
               value: {{ .Values.oauth.uiClientId | quote }}
             {{- end }}
             {{- end }}
+            {{- if and .Values.access .Values.access.projects }}
+            - name: PROJECT_ACCESS
+              value: {{ toJson .Values.access.projects | quote }}
+            {{- end }}
             - name: GIT_BRANCH
               value: {{ .Values.git.branch | quote }}
             {{- if .Values.git.remote.url }}
