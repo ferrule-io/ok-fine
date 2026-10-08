@@ -140,6 +140,165 @@ describe("KnowledgeService", () => {
     );
   });
 
+  it("exposes routing metadata on ProjectSummary and ProjectDetails, and filters by team and query", async () => {
+    const { service } = await setupService();
+
+    await service.createProject(alice, { project: "marketing-site", title: "Marketing Site", actor: "test/1.0" });
+    await service.createProject(alice, { project: "platform-core", title: "Platform Core", actor: "test/1.0" });
+    await service.createProject(alice, { project: "support-hub", title: "Support Hub", actor: "test/1.0" });
+    await service.createProject(alice, { project: "unrelated-proj", title: "Zeta Service", actor: "test/1.0" });
+
+    await service.writeConcept(alice, {
+      project: "support-hub",
+      id: "overview",
+      frontmatter: {
+        type: "Project",
+        title: "Customer Support Portal",
+        description: "Help desk and customer support portal",
+        repositories: ["git@github.com:Acme/Support.git"],
+        teams: ["Support", "tier-1"],
+        domains: "support-ops",
+        keywords: ["campaigns", 42, "campaigns", "  tickets  "],
+        audience: ["internal-agents", "staff"],
+        owners: ["alice-lead", "bob-lead"],
+      },
+      body: "# Customer Support Portal\n",
+      actor: "test/1.0",
+    });
+
+    await service.writeConcept(alice, {
+      project: "marketing-site",
+      id: "overview",
+      frontmatter: {
+        type: "Project",
+        title: "Marketing Site",
+        description: "Public marketing campaigns website",
+        repositories: ["https://github.com/acme/marketing"],
+        teams: ["Marketing"],
+        domains: ["growth", "seo"],
+        keywords: ["ads", "analytics"],
+        audience: ["customers"],
+        owners: ["carol-lead"],
+      },
+      body: "# Marketing Site\n",
+      actor: "test/1.0",
+    });
+
+    await service.writeConcept(alice, {
+      project: "platform-core",
+      id: "overview",
+      frontmatter: {
+        type: "Project",
+        title: "Platform Core",
+        description: "Core infrastructure platform",
+        repositories: ["git@github.com:Acme/Platform.git"],
+        teams: ["infra"],
+        domains: ["infrastructure"],
+        keywords: ["kubernetes"],
+        audience: ["developers"],
+        owners: ["dave-lead"],
+      },
+      body: "# Platform Core\n",
+      actor: "test/1.0",
+    });
+
+    await service.writeConcept(alice, {
+      project: "unrelated-proj",
+      id: "overview",
+      frontmatter: {
+        type: "Project",
+        title: "Zeta Service",
+        description: "Unrelated background worker",
+      },
+      body: "# Zeta Service\n",
+      actor: "test/1.0",
+    });
+
+    // 1. Normalized routing fields exposed on both getProject and listProjects
+    const details = await service.getProject("support-hub");
+    expect(details.teams).toEqual(["Support", "tier-1"]);
+    expect(details.domains).toEqual(["support-ops"]);
+    expect(details.keywords).toEqual(["campaigns", "tickets"]);
+    expect(details.audience).toEqual(["internal-agents", "staff"]);
+    expect(details.owners).toEqual(["alice-lead", "bob-lead"]);
+
+    const all = service.listProjects();
+    const summary = all.projects.find((p) => p.project === "support-hub");
+    expect(summary).toMatchObject({
+      teams: ["Support", "tier-1"],
+      domains: ["support-ops"],
+      keywords: ["campaigns", "tickets"],
+      audience: ["internal-agents", "staff"],
+      owners: ["alice-lead", "bob-lead"],
+    });
+
+    const unrelatedDetails = await service.getProject("unrelated-proj");
+    expect(unrelatedDetails.teams).toEqual([]);
+    expect(unrelatedDetails.domains).toEqual([]);
+    expect(unrelatedDetails.keywords).toEqual([]);
+    expect(unrelatedDetails.audience).toEqual([]);
+    expect(unrelatedDetails.owners).toEqual([]);
+
+    // 2. Team filter: case-insensitive equality against any entry; returns [] on no match
+    expect(service.listProjects({ team: "support" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
+    expect(service.listProjects({ team: "SUPPORT" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
+    expect(service.listProjects({ team: "tier-1" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
+    expect(service.listProjects({ team: "nonexistent" }).projects.map((p) => p.project)).toEqual([]);
+
+    // 3. Query filter: domains, keywords (prefix campaign -> campaigns, ticket -> tickets), title
+    expect(service.listProjects({ query: "growth" }).projects.map((p) => p.project)).toEqual(["marketing-site"]);
+    expect(service.listProjects({ query: "infra" }).projects.map((p) => p.project)).toEqual(["platform-core"]);
+    expect(service.listProjects({ query: "campaign" }).projects.map((p) => p.project)).toEqual([
+      "marketing-site",
+      "support-hub",
+    ]);
+    expect(service.listProjects({ query: "ticket" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
+    expect(service.listProjects({ query: "ad" }).projects.map((p) => p.project)).toEqual(["marketing-site"]);
+    expect(service.listProjects({ query: "zeta" }).projects.map((p) => p.project)).toEqual(["unrelated-proj"]);
+
+    // Query terms appearing only in owners or audience do not match
+    expect(service.listProjects({ query: "alice" }).projects).toEqual([]);
+    expect(service.listProjects({ query: "carol" }).projects).toEqual([]);
+    expect(service.listProjects({ query: "internal-agents" }).projects).toEqual([]);
+    expect(service.listProjects({ query: "developers" }).projects).toEqual([]);
+
+    // 4. Unfiltered and whitespace-only filters return all projects
+    expect(service.listProjects().projects.map((p) => p.project)).toEqual([
+      "marketing-site",
+      "platform-core",
+      "support-hub",
+      "unrelated-proj",
+    ]);
+    expect(service.listProjects({ team: "   ", query: "   " }).projects.map((p) => p.project)).toEqual([
+      "marketing-site",
+      "platform-core",
+      "support-hub",
+      "unrelated-proj",
+    ]);
+
+    // 5. Combined filters AND together
+    expect(service.listProjects({ team: "support", query: "campaign" }).projects.map((p) => p.project)).toEqual([
+      "support-hub",
+    ]);
+    expect(service.listProjects({ team: "marketing", query: "ticket" }).projects.map((p) => p.project)).toEqual([]);
+
+    expect(
+      service
+        .listProjects({ repository: "https://github.com/acme/marketing", team: "marketing" })
+        .projects.map((p) => p.project),
+    ).toEqual(["marketing-site"]);
+    expect(
+      service
+        .listProjects({ repository: "https://github.com/acme/marketing", team: "support" })
+        .projects.map((p) => p.project),
+    ).toEqual([]);
+    expect(
+      service
+        .listProjects({ repository: "git@github.com:Acme/Support.git", team: "support" })
+        .projects.map((p) => p.project),
+    ).toEqual(["support-hub"]);
+  });
+
   it("create project + write concept records correctly in catalog, index.md, log.md, and git", async () => {
     const { service, dataDir } = await setupService();
 

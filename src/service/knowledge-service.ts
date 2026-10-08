@@ -57,6 +57,16 @@ import { checkActor, type Principal } from "./principal.js";
 const LEGACY_PROPOSAL_DIR = "proposals/";
 const PROPOSAL_TARGET_DIR = "decisions/";
 
+/**
+ * Tokenize text into lowercase terms by splitting on any run of non-letter/non-digit characters (Unicode aware).
+ */
+function tokenizeQuery(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length > 0);
+}
+
 export interface ProjectSummary {
   project: string;
   title: string;
@@ -66,6 +76,12 @@ export interface ProjectSummary {
   updatedAt: string | null;
   /** Normalized git remotes (`host/path`) from the overview's `repositories` frontmatter. */
   repositories: string[];
+  /** Routing metadata from the overview frontmatter (string or list; non-strings dropped, trimmed, empties dropped, exact duplicates removed, first-seen order). */
+  teams: string[];
+  domains: string[];
+  audience: string[];
+  keywords: string[];
+  owners: string[];
 }
 
 export interface ProjectDetails extends ProjectSummary {
@@ -287,24 +303,41 @@ export class KnowledgeService {
     return tree;
   }
 
-  /** Normalized, deduplicated `repositories` from the project's overview frontmatter, in first-seen order. */
-  private repositoriesOf(project: string): string[] {
-    const raw = this.catalog.get(project, "overview")?.frontmatter?.repositories;
+  /**
+   * Routing or list strings from overview frontmatter (string or array), with non-strings
+   * dropped, trimmed, empties dropped, exact duplicates removed, in first-seen order.
+   */
+  private overviewStrings(frontmatter: Record<string, unknown> | null | undefined, key: string): string[] {
+    const raw = frontmatter?.[key];
     const values = typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : [];
     const out: string[] = [];
     for (const value of values) {
       if (typeof value !== "string") continue;
+      const trimmed = value.trim();
+      if (trimmed.length > 0 && !out.includes(trimmed)) {
+        out.push(trimmed);
+      }
+    }
+    return out;
+  }
+
+  /** Normalized, deduplicated `repositories` from the project's overview frontmatter, in first-seen order. */
+  private repositoriesOf(frontmatter: Record<string, unknown> | null | undefined): string[] {
+    const out: string[] = [];
+    for (const value of this.overviewStrings(frontmatter, "repositories")) {
       const normalized = normalizeRepository(value);
       if (normalized !== null && !out.includes(normalized)) out.push(normalized);
     }
     return out;
   }
 
-  listProjects(filter: { repository?: string } = {}): { projects: ProjectSummary[] } {
-    let wanted: string | null = null;
+  listProjects(filter: { repository?: string; team?: string; query?: string } = {}): {
+    projects: ProjectSummary[];
+  } {
+    let wantedRepository: string | null = null;
     if (filter.repository !== undefined) {
-      wanted = normalizeRepository(filter.repository);
-      if (wanted === null) {
+      wantedRepository = normalizeRepository(filter.repository);
+      if (wantedRepository === null) {
         throw new OkfError(
           "bad_request",
           400,
@@ -312,14 +345,54 @@ export class KnowledgeService {
         );
       }
     }
+
+    const teamFilter = filter.team?.trim();
+    const wantedTeam = teamFilter && teamFilter.length > 0 ? teamFilter.toLowerCase() : null;
+
+    const queryFilter = filter.query?.trim();
+    const queryTerms = queryFilter && queryFilter.length > 0 ? tokenizeQuery(queryFilter) : [];
+    const hasQueryFilter = queryTerms.length > 0;
+
     const projects = this.catalog.projects();
     const now = new Date();
     const summaries: ProjectSummary[] = [];
 
     for (const project of projects) {
-      const records = this.catalog.records(project);
       const overview = this.catalog.get(project, "overview");
+      const frontmatter = overview?.frontmatter;
 
+      const repositories = this.repositoriesOf(frontmatter);
+      if (wantedRepository !== null && !repositories.includes(wantedRepository)) {
+        continue;
+      }
+
+      const teams = this.overviewStrings(frontmatter, "teams");
+      if (wantedTeam !== null && !teams.some((t) => t.toLowerCase() === wantedTeam)) {
+        continue;
+      }
+
+      const domains = this.overviewStrings(frontmatter, "domains");
+      const keywords = this.overviewStrings(frontmatter, "keywords");
+      const title = overview?.title ?? project;
+      const description = overview?.description ?? null;
+
+      if (hasQueryFilter) {
+        const haystackTokens: string[] = [
+          ...tokenizeQuery(title),
+          ...(description ? tokenizeQuery(description) : []),
+          ...domains.flatMap(tokenizeQuery),
+          ...keywords.flatMap(tokenizeQuery),
+        ];
+        const matchesQuery = queryTerms.some((q) => haystackTokens.some((h) => h.startsWith(q)));
+        if (!matchesQuery) {
+          continue;
+        }
+      }
+
+      const audience = this.overviewStrings(frontmatter, "audience");
+      const owners = this.overviewStrings(frontmatter, "owners");
+
+      const records = this.catalog.records(project);
       let latestUpdatedAt: string | null = null;
       let staleCount = 0;
 
@@ -334,17 +407,19 @@ export class KnowledgeService {
         }
       }
 
-      const repositories = this.repositoriesOf(project);
-      if (wanted !== null && !repositories.includes(wanted)) continue;
-
       summaries.push({
         project,
-        title: overview?.title ?? project,
-        description: overview?.description ?? null,
+        title,
+        description,
         conceptCount: records.length,
         staleCount,
         updatedAt: latestUpdatedAt,
         repositories,
+        teams,
+        domains,
+        audience,
+        keywords,
+        owners,
       });
     }
 
@@ -355,6 +430,7 @@ export class KnowledgeService {
     await this.assertProjectExists(project);
     const records = this.catalog.records(project);
     const overview = this.catalog.get(project, "overview");
+    const frontmatter = overview?.frontmatter;
     const now = new Date();
 
     let latestUpdatedAt: string | null = null;
@@ -389,7 +465,12 @@ export class KnowledgeService {
       conceptCount: records.length,
       staleCount,
       updatedAt: latestUpdatedAt,
-      repositories: this.repositoriesOf(project),
+      repositories: this.repositoriesOf(frontmatter),
+      teams: this.overviewStrings(frontmatter, "teams"),
+      domains: this.overviewStrings(frontmatter, "domains"),
+      audience: this.overviewStrings(frontmatter, "audience"),
+      keywords: this.overviewStrings(frontmatter, "keywords"),
+      owners: this.overviewStrings(frontmatter, "owners"),
       typeCounts,
       trustTierCounts,
     };

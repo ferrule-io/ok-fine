@@ -113,8 +113,14 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
   const admin = { permission: "admin" } as const;
 
   app.get("/api/v1/projects", { config: read }, async (req) => {
-    const { repository } = z.object({ repository: z.string().optional() }).parse(req.query);
-    return service.listProjects({ repository });
+    const { repository, team, query } = z
+      .object({
+        repository: z.string().optional(),
+        team: z.string().optional(),
+        query: z.string().optional(),
+      })
+      .parse(req.query);
+    return service.listProjects({ repository, team, query });
   });
 
   app.post("/api/v1/projects", { config: write }, async (req, reply) => {

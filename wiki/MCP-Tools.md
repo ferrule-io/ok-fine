@@ -2,7 +2,7 @@ A client only sees the tools its token's scopes allow. Over stdio, every tool is
 
 | Tool | Scope | Purpose |
 |---|---|---|
-| `list_projects` | read | Projects with counts and bound git repositories; call first to pick a project (pass `repository` in a git repo, omit otherwise) |
+| `list_projects` | read | Projects with counts, bound git repositories, and routing metadata (`teams`, `domains`, `audience`, `keywords`, `owners`); call first to pick a project (pass `repository` in a git repo; or `team` and/or `query`, or no arguments) |
 | `get_index` | read | Directory listing: concepts by type, files, subdirectories |
 | `read_concept` | read | Frontmatter, body, derived trust/staleness, links, lint issues (including `unresolved_conflict`), `revision` |
 | `search_concepts` | read | Keyword search (`query` max 512 chars) with filters; omitting `project` searches every project and returns `project` for `read_concept` |
