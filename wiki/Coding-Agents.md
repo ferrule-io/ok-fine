@@ -15,7 +15,7 @@ The agent package is built from [`agents/`](https://github.com/ferrule-io/ok-fin
 - a hook for Claude Code, Codex, and Gemini CLI and an extension for pi and omp that tell the agent which git
   repository it is in and to look up its ok-fine project before planning or editing; the full reminder is injected
   at session start, then a one-line reminder on each prompt until the session has called an ok-fine lookup tool
-  (`list_projects`, `search_concepts`, `read_concept`, `get_index`). Hooks run on SessionStart plus
+  (`list_projects`, `search_concepts`, `read_concept`, `get_index`, `orient`). Hooks run on SessionStart plus
   UserPromptSubmit (Claude Code, Codex) / BeforeAgent (Gemini CLI), and the pi/omp extension runs on each prompt
   (`before_agent_start`). They run locally and never call ok-fine, and the per-prompt line stops once the
   transcript/session shows an ok-fine lookup call whose tool name is bare or contains `ok-fine`/`ok_fine` (so name

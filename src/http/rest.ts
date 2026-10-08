@@ -123,6 +123,17 @@ export function registerRestRoutes(app: FastifyInstance, service: KnowledgeServi
     return service.listProjects({ repository, team, query });
   });
 
+  app.get("/api/v1/orient", { config: read }, async (req) => {
+    const { question, project, limit } = z
+      .object({
+        question: z.string().min(1).max(512),
+        project: z.string().optional(),
+        limit: z.coerce.number().int().min(1).max(50).optional(),
+      })
+      .parse(req.query);
+    return service.orient(principalOf(req), { question, project, limit });
+  });
+
   app.post("/api/v1/projects", { config: write }, async (req, reply) => {
     const body = z
       .object({ project: z.string(), title: z.string(), description: z.string().optional() })

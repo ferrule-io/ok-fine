@@ -5,6 +5,7 @@ updates or `If-None-Match: *` for create-only PUTs of concepts and files (other 
 | Method | Path | Scope | Notes |
 |---|---|---|---|
 | GET | `/projects` | read | `?repository=&team=&query=`; returns project summaries with counts, bound repositories, and routing metadata (`teams`, `domains`, `audience`, `keywords`, `owners`) |
+| GET | `/orient` | read | `?question=&project=&limit=`; `question` max 512 chars, `limit` max 50; ranks relevant projects and concepts for a question, returns working rules |
 | POST | `/projects` | write | `{ project, title, description? }` → 201 |
 | GET | `/projects/:project` | read | summary with type and trust tier counts, routing metadata (`teams`, `domains`, `audience`, `keywords`, `owners`) |
 | DELETE | `/projects/:project` | admin | |

@@ -17,7 +17,7 @@ esac
 
 if [ "$event" = "UserPromptSubmit" ] || [ "$event" = "BeforeAgent" ]; then
   transcript_path=$(printf '%s\n' "$input" | sed -n 's/.*"transcript_path"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | sed -n '1p')
-  pattern='"(name|tool|toolName|tool_name)" *: *"([^"]*ok[-_]fine[^"]*[_:/.-])?(list_projects|search_concepts|read_concept|get_index)"'
+  pattern='"(name|tool|toolName|tool_name)" *: *"([^"]*ok[-_]fine[^"]*[_:/.-])?(list_projects|search_concepts|read_concept|get_index|orient)"'
   if [ -n "$transcript_path" ] && [ -f "$transcript_path" ] && [ -r "$transcript_path" ] && grep -Eiq "$pattern" "$transcript_path" 2>/dev/null; then
     exit 0
   fi

@@ -47,6 +47,6 @@ Clients that take a static header can pass `Authorization: Bearer <token>` direc
 The server sends usage instructions to the client on connect (note: claude.ai and Claude Desktop drop `instructions`, so the same routing guidance is included in the `list_projects` and `search_concepts` tool descriptions). In short:
 1. If a project is named explicitly by the user or workspace instructions, use it.
 2. In a git repository with a remote, resolve with `list_projects` passing `repository` (e.g. from `git remote get-url origin`); if none match, offer onboarding via the ok-fine-onboard skill.
-3. Otherwise (no repository, no shell, or no remote), call `list_projects` without arguments and pick by title and description, or search across all projects with `search_concepts` omitting `project`. Never run git commands or offer onboarding on this path.
+3. Otherwise (no repository, no shell, or no remote), call `orient` with the user's question to rank relevant projects and concepts across the organization, or call `list_projects` (with `team` and/or `query`, or without arguments) and pick by title and description, or search across all projects with `search_concepts` omitting `project`. Never run git commands or offer onboarding on this path.
 
 Discover with `get_index` or `search_concepts`, read with `read_concept`, write with `write_concept` passing `expectedRevision`, and prefer `status: deprecated` over deleting.
