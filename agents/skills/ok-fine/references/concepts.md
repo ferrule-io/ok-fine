@@ -1,6 +1,6 @@
 # Concept Templates
 
-Templates and structural conventions for ok-fine knowledge concepts. Sources in code repositories include the repository-relative path and commit hash. For non-code sources (policies, processes, web URLs, documents), `resource` is a URL or stable URI and `commit` is omitted.
+Templates and structural conventions for ok-fine knowledge concepts. Sources in code repositories include the repository-relative path and commit hash. For non-code sources (policies, processes, web URLs, documents), `resource` is a URL or stable URI with `title`, `author`, and `last_modified` (ISO 8601 with explicit offset), and `commit` is omitted.
 
 ## Decision
 
@@ -31,6 +31,9 @@ stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: refund-policy
     resource: https://handbook.example.com/finance/refunds
+    title: Customer Operations Refund Policy
+    author: Finance Team
+    last_modified: 2026-08-15T10:00:00Z
 ```
 
 ### Body Headings
@@ -226,6 +229,9 @@ stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: incident-88
     resource: https://status.example.com/incidents/88
+    title: Stripe Incident 88 Postmortem
+    author: Payment Ops
+    last_modified: 2026-05-10T14:30:00Z
 ```
 
 ### Body Headings
@@ -260,6 +266,268 @@ sources:
 - ## Definition
 - ## Usage
 - ## Related
+
+---
+
+# Business concept types
+
+Templates and structural conventions for non-coding and team-level knowledge (support, sales, marketing, operations).
+
+Note: Glossary Term and Decision reuse the templates from the technical section above with business prefixes and horizons:
+- **Glossary Term**: Id prefix `glossary/<term>`, `stale_after` 365 days. Use for organization-wide terminology, acronyms, and business metrics.
+- **Decision**: Id prefix `decisions/<slug>`, `stale_after` 180 days. Use for cross-functional business, policy, and organizational decisions.
+
+## Playbook (Business)
+
+Use for operational procedures and standard operating procedures for customer support, sales operations, marketing, or team workflows. Business Playbooks use `playbooks/<slug>` (engineering runbooks keep `runbooks/<slug>`).
+
+### Frontmatter Example
+```yaml
+type: Playbook
+title: Process Customer Refund Request
+description: Step-by-step procedure for support agents validating and issuing customer refunds.
+status: draft
+tags: [support, refunds, operations, playbook]
+stale_after: "<ISO 8601 timestamp 90 to 180 days from now, e.g. 2027-01-06T00:00:00Z>"
+sources:
+  - id: zendesk-macro
+    resource: https://support.example.com/agent/macros/360012345678
+    title: Zendesk Refund Macro and Handling Guide
+    author: Support Ops
+    last_modified: 2026-09-15T12:00:00Z
+```
+
+### Body Headings
+- ## When to use
+- ## Steps
+- ## Verification
+- ## Escalation
+
+---
+
+## Policy
+
+Use for governance rules, compliance standards, spending limits, and organizational policies.
+
+### Frontmatter Example
+```yaml
+type: Policy
+title: Customer Refund and Return Policy
+description: Rules and timeframes governing eligibility for customer subscription and fee refunds.
+status: draft
+tags: [policy, finance, refunds, governance]
+stale_after: "<ISO 8601 timestamp 180 to 365 days from now, e.g. 2027-04-06T00:00:00Z>"
+sources:
+  - id: refund-policy
+    resource: https://handbook.example.com/finance/refunds-policy
+    title: Corporate Customer Refund Policy
+    author: Finance Team
+    last_modified: 2026-08-15T10:00:00Z
+```
+
+### Body Headings
+- ## Policy
+- ## Scope
+- ## Exceptions
+- ## Owner
+
+---
+
+## Process
+
+Use for recurring multi-step cross-functional workflows, handoffs, and operational handshakes.
+
+### Frontmatter Example
+```yaml
+type: Process
+title: Customer Onboarding and Technical Kickoff
+description: End-to-end workflow from signed sales contract through kickoff call and initial provisioning.
+status: draft
+tags: [process, onboarding, sales, customer-success]
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-06T00:00:00Z>"
+sources:
+  - id: onboarding-guide
+    resource: https://handbook.example.com/ops/customer-onboarding-sop
+    title: Customer Onboarding Standard Operating Procedure
+    author: Customer Success
+    last_modified: 2026-07-20T14:00:00Z
+```
+
+### Body Headings
+- ## Trigger
+- ## Steps
+- ## Roles
+- ## Handoffs
+- ## SLA
+
+---
+
+## Escalation
+
+Use for triage paths, severity criteria, and notification channels when an issue exceeds first-line resolution.
+
+### Frontmatter Example
+```yaml
+type: Escalation
+title: Critical Production Outage Escalation
+description: Routing path and communication protocol for frontline support escalating customer-impacting outages.
+status: draft
+tags: [escalation, support, incidents, severity-1]
+stale_after: "<ISO 8601 timestamp 90 to 180 days from now, e.g. 2027-01-06T00:00:00Z>"
+sources:
+  - id: slack-triage
+    resource: https://example.slack.com/archives/C01234567/p1696000000000000
+    title: Tier 1 to Tier 2 Outage Escalation Protocol
+    author: Support Ops
+    last_modified: 2026-09-10T16:00:00Z
+```
+
+### Body Headings
+- ## When to escalate
+- ## Who / channel
+- ## What to include
+- ## Response targets
+
+---
+
+## FAQ
+
+Use for canonical answers to recurring questions asked by customers, sales prospects, or internal teams.
+
+### Frontmatter Example
+```yaml
+type: FAQ
+title: Annual Subscription Proration and Midterm Seat Additions
+description: Standard answer for customer questions regarding adding user seats during an active contract year.
+status: draft
+tags: [faq, billing, support, sales]
+stale_after: "<ISO 8601 timestamp 90 to 180 days from now, e.g. 2027-01-06T00:00:00Z>"
+sources:
+  - id: billing-kb
+    resource: https://support.example.com/kb/articles/billing-proration
+    title: "Knowledge Base Article: Annual Billing Proration"
+    author: Finance Team
+    last_modified: 2026-08-25T11:00:00Z
+```
+
+### Body Headings
+- ## Question
+- ## Answer
+- ## Edge cases
+- ## Related
+
+---
+
+## Campaign
+
+Use for marketing initiatives, demand generation programs, product launches, and seasonal campaigns.
+
+### Frontmatter Example
+```yaml
+type: Campaign
+title: Q4 Enterprise Demand Generation Campaign
+description: Multi-channel paid and email outreach campaign targeting enterprise procurement leaders.
+status: draft
+tags: [campaign, marketing, demand-gen, q4]
+stale_after: "<ISO 8601 timestamp 30 to 90 days from now, e.g. 2026-11-07T00:00:00Z>"
+sources:
+  - id: ad-brief
+    resource: https://docs.google.com/document/d/1a2b3c4d5e6f7g8h9/view
+    title: Q4 Demand Generation Campaign Brief
+    author: Growth Marketing
+    last_modified: 2026-10-01T08:00:00Z
+```
+
+### Body Headings
+- ## Goal
+- ## Audience
+- ## Channels and budget
+- ## Timeline
+- ## Results
+- ## Learnings
+
+---
+
+## Persona
+
+Use for target customer archetypes, buyer personas, evaluation motivations, and pain points.
+
+### Frontmatter Example
+```yaml
+type: Persona
+title: VP of Operations Buyer Persona
+description: Role profile, purchasing criteria, and objections for operations leadership decision-makers.
+status: draft
+tags: [persona, sales, marketing, buyer-profile]
+stale_after: "<ISO 8601 timestamp 90 to 180 days from now, e.g. 2027-01-06T00:00:00Z>"
+sources:
+  - id: notion-buyer-persona
+    resource: https://notion.example.com/company/product/personas/vp-ops
+    title: "Buyer Persona Research: VP Operations"
+    author: Product Marketing
+    last_modified: 2026-06-12T15:30:00Z
+```
+
+### Body Headings
+- ## Who they are
+- ## Goals
+- ## Pain points
+- ## How we talk to them
+
+---
+
+## Product
+
+Use for product packaging, edition tiers, feature sets, pricing models, and target market segments.
+
+### Frontmatter Example
+```yaml
+type: Product
+title: Team Edition Subscription Tier
+description: Overview of features, user seat limits, pricing tiers, and positioning for Team Edition.
+status: draft
+tags: [product, pricing, catalog, sales]
+stale_after: "<ISO 8601 timestamp 90 to 180 days from now, e.g. 2027-01-06T00:00:00Z>"
+sources:
+  - id: product-spec
+    resource: https://handbook.example.com/commercial/product-catalog
+    title: Commercial Product Catalog and Tier Definitions
+    author: Product Team
+    last_modified: 2026-07-01T10:00:00Z
+```
+
+### Body Headings
+- ## What it is
+- ## Who it's for
+- ## Pricing and plans
+- ## Common questions
+
+---
+
+## Template
+
+Use for reusable message templates, email replies, proposal outlines, and standard document skeletons.
+
+### Frontmatter Example
+```yaml
+type: Template
+title: Security Questionnaire Response Email
+description: Standardized canned response for answering prospective customer security and compliance inquiries.
+status: draft
+tags: [template, sales, security, support]
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-06T00:00:00Z>"
+sources:
+  - id: notion-canned-response
+    resource: https://notion.example.com/company/sales/security-canned-response
+    title: Security Canned Response Library
+    author: Security Team
+    last_modified: 2026-09-05T13:45:00Z
+```
+
+### Body Headings
+- ## When to use
+- ## Template text
+- ## Placeholders
 
 ---
 
@@ -318,6 +586,9 @@ stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
 sources:
   - id: refund-policy
     resource: https://handbook.example.com/finance/refunds
+    title: Customer Operations Refund Policy
+    author: Finance Team
+    last_modified: 2026-08-15T10:00:00Z
 ---
 
 ## Context
@@ -336,4 +607,44 @@ All direct customers may request a full refund within 30 days of purchase for un
 - No cash refunds / store credit only: rejected due to negative impact on trial conversion.
 
 [^refund-policy]: Documented in Customer Operations Policy, `https://handbook.example.com/finance/refunds`.
+```
+
+---
+
+## Complete Business FAQ Example
+
+```yaml
+---
+type: FAQ
+title: Annual Subscription Proration and Midterm Seat Additions
+description: Standard answer for customer questions regarding adding user seats during an active contract year.
+status: draft
+tags:
+  - faq
+  - billing
+  - support
+stale_after: "<ISO 8601 timestamp 90 to 180 days from now, e.g. 2027-01-06T00:00:00Z>"
+sources:
+  - id: billing-kb
+    resource: https://support.example.com/kb/articles/billing-proration
+    title: "Knowledge Base Article: Annual Billing Proration"
+    author: Finance Team
+    last_modified: 2026-08-25T11:00:00Z
+---
+
+## Question
+How are additional user seats billed when added midway through an annual contract term?
+
+## Answer
+When an account administrator adds seats during an active annual billing cycle, the new seats are billed on a prorated basis for the remaining days until the renewal date[^billing-kb]. The system issues an immediate invoice for the prorated charge, and the renewed total seat count will apply automatically at the next annual billing renewal.
+
+## Edge cases
+- Reductions in seat count during an active annual term take effect only at the end of the current term; unused time on removed seats is not refunded.
+- For customers invoiced under custom contractual terms (such as Net 30), a separate prorated invoice is generated immediately rather than charged directly to a credit card.
+
+## Related
+- [Customer Refund and Return Policy](/policies/refund-policy.md)
+- [Enterprise Discount Approval Matrix](/policies/discount-matrix.md)
+
+[^billing-kb]: Documented in Billing Knowledge Base Article 104, `https://support.example.com/kb/articles/billing-proration`.
 ```

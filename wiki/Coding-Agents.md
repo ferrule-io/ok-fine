@@ -10,7 +10,7 @@ The agent package is built from [`agents/`](https://github.com/ferrule-io/ok-fin
 [`ferrule-io/ok-fine-agents`](https://github.com/ferrule-io/ok-fine-agents) whenever a release changes it. It contains:
 
 - three [Agent Skills](https://agentskills.io): `ok-fine` (find the project, recall before work, record after),
-  `ok-fine-onboard` (bind a repository and bootstrap knowledge), and `ok-fine-review` (lint, staleness, drift,
+  `ok-fine-onboard` (bind a repository and bootstrap knowledge, or interview a non-coding team to create and seed its project; see [Organization rollout](https://github.com/ferrule-io/ok-fine/wiki/Organization-Rollout)), and `ok-fine-review` (lint, staleness, drift,
   verification);
 - a hook for Claude Code, Codex, and Gemini CLI and an extension for pi and omp that tell the agent which git
   repository it is in and to look up its ok-fine project before planning or editing; the full reminder is injected

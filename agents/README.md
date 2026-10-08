@@ -44,5 +44,5 @@ Replace `https://okf.example.com` with your ok-fine server's `PUBLIC_BASE_URL`.
 | pi | `pi install git:github.com/ferrule-io/ok-fine-agents` | `~/.pi/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"url":"https://okf.example.com/mcp","exposure":"direct"}}}` (pre-registered: `oauth.clientId`/`callbackPort`) | `pi mcp login ok-fine` |
 | omp | `omp plugin marketplace add ferrule-io/ok-fine-agents` then `omp plugin install ok-fine@ok-fine` | `~/.omp/agent/mcp.json`: `{"mcpServers":{"ok-fine":{"type":"http","url":"https://okf.example.com/mcp"}}}` | `/mcp reauth ok-fine` |
 
-Then, once per codebase, ask the agent to "onboard this repository to ok-fine". Afterwards work normally; ask it to
+Then, once per codebase, ask the agent to "onboard this repository to ok-fine". Outside a repository (such as in Claude Desktop), ask it to "onboard the <team> team to ok-fine", which runs a short interview and seeds draft concepts for the owner to review. Afterwards work normally; ask it to
 "review ok-fine knowledge" to audit and refresh what it knows.

@@ -25,6 +25,59 @@ initialization ([anthropics/claude-ai-mcp#93](https://github.com/anthropics/clau
 descriptions arrive intact. Because server-level instructions do not reach the model in these harnesses, routing
 guidance travels in individual tool descriptions, the `ok-fine` skill, and workspace-level project instructions.
 
+# Onboarding a team
+
+For non-coding teams (such as support, sales, marketing, and operations) using Claude Desktop, claude.ai, or ChatGPT with the ok-fine skills installed, onboarding is conversational and user-initiated only. Outside a git repository, an agent never says "not onboarded" or offers onboarding unasked. To start, the user asks to onboard a team (for example, "onboard the support team to ok-fine"); the `ok-fine-onboard` skill then runs the interview.
+
+## Recommended organization layout
+
+- **Hub project (`org`):** A shared hub holding company-wide policies, a common glossary, and the team and owner directory.
+- **Team projects:** One project per team (e.g. `support`, `sales`, `marketing`) holding team-specific playbooks, processes, FAQs, templates, and domain knowledge.
+- **Process projects:** A separate process project only when several teams genuinely share a single cross-functional process.
+- **Project identifiers:** Project names must match `^[a-z0-9][a-z0-9-]{0,62}$`.
+
+## The onboarding interview
+
+The `ok-fine-onboard` skill walks through six steps:
+
+1. **Team and audience:** Identify which team owns the project and who will consume this knowledge.
+2. **Top recurring questions and tasks:** Gather the top 5 recurring questions or tasks the team handles.
+3. **Existing documentation:** Collect existing documents, links (Google Docs, Notion pages, Zendesk macros, Slack permalinks), or pasted text.
+4. **Create and bind project:** Create the project with `create_project` (which takes only `project`, `title`, `description`, and `actor`). Then call `read_concept` on the generated overview concept and `write_concept` it (passing `expectedRevision`) to set `stale_after` and add binding fields as plain overview frontmatter keys:
+   - `teams`: string list of team names
+   - `domains`: string list of functional domains
+   - `audience`: string list of target roles
+   - `keywords`: string list of key search terms
+   - `owners`: list of team or role aliases (e.g. `support-leads`), never an individual's name or email
+
+   These names match planned [issue #35](https://github.com/ferrule-io/ok-fine/issues/35), where the server will expose and filter on them; until then, they are plain frontmatter keys preserved by the server.
+5. **Seed initial concepts:** Seed 5–12 concepts as `status: draft`, mapped from the recurring questions, tasks, and documents.
+6. **Owner walk-through and verification:** Go through each seeded concept with the owner. For each concept the owner confirms (optionally after edits):
+   - Set `status: stable` via `write_concept` (with `expectedRevision`); confirmation alone does not change `status`.
+   - Call `verify_concept` with `actor: human:<email>`.
+
+   The server requires `human:<email>` to equal the authenticated token identity, so this works only when the owner is the person in the session (ask the user for their email, as there is no git config outside a repository). On `forbidden_actor`, report both identities and leave the concept for the owner to verify in their own session; never retry as another actor.
+
+## Business concept types
+
+| Type | Id prefix | `stale_after` |
+|---|---|---|
+| Playbook | `playbooks/` | 90–180d |
+| Policy | `policies/` | 180–365d |
+| Process | `processes/` | 180d |
+| Escalation | `escalations/` | 90–180d |
+| FAQ | `faqs/` | 90–180d |
+| Campaign | `campaigns/` | 30–90d |
+| Persona / Product | `personas/`, `products/` | 90–180d |
+| Template | `templates/` | 180d |
+| Glossary Term / Decision | `glossary/`, `decisions/` | 365d / 180d |
+
+*Note:* Coding projects keep `runbooks/<slug>` for engineering Playbooks; business Playbooks use `playbooks/<slug>`.
+
+## The recording loop
+
+Knowledge capture continues during regular work. When a customer support representative resolves a new kind of case, or a campaign closes, the agent proposes (asking the user before writing) a draft FAQ, Escalation, or Playbook concept (`status: draft`). The agent searches existing knowledge first using `search_concepts` to update an existing concept instead of duplicating.
+
 # Client registration and identity provider
 
 The identity provider (IdP), not ok-fine, handles client registration. ok-fine operates purely as an OAuth 2.1
@@ -98,7 +151,13 @@ In non-coding desktop environments, concepts often describe business rules, work
 rather than git-tracked source code.
 
 - **Freshness without code sources:** A concept with no code sources is considered fresh when `stale_after` is set
-  and is not in the past.
+  and is not in the past. Timestamps for `stale_after` and `last_modified` must use ISO 8601 with an explicit offset (e.g. `2026-09-30T14:00:00Z`); lint warns if the offset is omitted.
+- **Non-code sources:** Non-code sources carry `title`, `author`, `last_modified`, and no `commit`. The `resource` property is a URL (such as a Google Doc, Notion page, Zendesk macro, or Slack permalink) or a stable URI.
+  - *Clean URIs:* Server lint warns (`invalid_resource`) when `resource` contains whitespace or any shell metacharacters (`` ` $ ; | & < > ( ) \ ' " ``). Drop query parameters containing `&` (such as Slack `&cid=`) or percent-encode `&` as `%26`.
+  - *Pasted text:* When documents are pasted without an existing URL, use a stable URI such as `urn:ok-fine:pasted:<slug>` with `title` and `author`.
+  - *Dates:* URL sources require `last_modified`, taken from the document or its owner, never the time it was read; a URL whose date nobody knows is not cited until it is known. Pasted text carries `last_modified` only when its date is stated.
+  - *Footnote citations:* Footnote citations `[^id]` in concept text must correspond to a source `id`; lint warns if a footnote matches no source id.
+  - *Privacy and secrets:* Never record personal data (customer or employee names, emails, phone numbers) or secrets; `owners` on the overview and `author` in sources hold team or role names only.
 - **Drift detection:** Non-code sources define `resource` as a URL (or other stable URI) without a `commit` property.
   When a tool available in the session can fetch the source's `resource` URL and report its last-modified timestamp,
   a source modified after the concept's `generated.at` timestamp counts as drifted.
