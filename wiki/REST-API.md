@@ -4,9 +4,9 @@ updates or `If-None-Match: *` for create-only PUTs of concepts and files (other 
 
 | Method | Path | Scope | Notes |
 |---|---|---|---|
-| GET | `/projects` | read | `?repository=<git remote URL>` |
+| GET | `/projects` | read | `?repository=&team=&query=`; returns project summaries with counts, bound repositories, and routing metadata (`teams`, `domains`, `audience`, `keywords`, `owners`) |
 | POST | `/projects` | write | `{ project, title, description? }` → 201 |
-| GET | `/projects/:project` | read | summary with type and trust tier counts |
+| GET | `/projects/:project` | read | summary with type and trust tier counts, routing metadata (`teams`, `domains`, `audience`, `keywords`, `owners`) |
 | DELETE | `/projects/:project` | admin | |
 | GET | `/projects/:project/index` | read | `?path=<dir>` |
 | GET | `/projects/:project/concepts/<id>` | read | JSON; `Accept: text/markdown` returns the raw file |

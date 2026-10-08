@@ -50,7 +50,7 @@ The `ok-fine-onboard` skill walks through six steps:
    - `keywords`: string list of key search terms
    - `owners`: list of team or role aliases (e.g. `support-leads`), never an individual's name or email
 
-   These names match planned [issue #35](https://github.com/ferrule-io/ok-fine/issues/35), where the server will expose and filter on them; until then, they are plain frontmatter keys preserved by the server.
+   The server exposes these fields on `list_projects` and `GET /api/v1/projects`, and filters projects by `team` (case-insensitive match against `teams`) and `query` (term prefix matching across title, description, `domains`, and `keywords`).
 5. **Seed initial concepts:** Seed 5–12 concepts as `status: draft`, mapped from the recurring questions, tasks, and documents.
 6. **Owner walk-through and verification:** Go through each seeded concept with the owner. For each concept the owner confirms (optionally after edits):
    - Set `status: stable` via `write_concept` (with `expectedRevision`); confirmation alone does not change `status`.

@@ -8,7 +8,7 @@ import type { KnowledgeService } from "../service/knowledge-service.js";
 import type { Principal } from "../service/principal.js";
 import { VERSION } from "../version.js";
 
-export const INSTRUCTIONS = `ok-fine holds shared project knowledge outside the codebase, as OKF v0.2 markdown concepts grouped into projects. Project resolution order: 1) A project named explicitly by the user or by harness project/workspace instructions (e.g. Claude Project instructions, a custom GPT's instructions): use it. 2) In a git repository with a remote: call list_projects with \`repository\` set to the remote URL (\`git remote get-url origin\`, falling back to the first remote); use the returned project(s) for every read and write. If none match, say the repository is not onboarded and offer to onboard it (ok-fine-onboard skill). 3) Otherwise (no repository, no shell, or no remote): call list_projects with no arguments, pick the project(s) whose title and description fit the question, and call search_concepts without \`project\` to search across all projects. Never run git commands and never say "not onboarded" or offer onboarding on this path. If several fit, read from all; ask before writing only when the write target is ambiguous. Search before planning or editing; record durable decisions, conventions, and runbooks afterwards.
+export const INSTRUCTIONS = `ok-fine holds shared project knowledge outside the codebase, as OKF v0.2 markdown concepts grouped into projects. Project resolution order: 1) A project named explicitly by the user or by harness project/workspace instructions (e.g. Claude Project instructions, a custom GPT's instructions): use it. 2) In a git repository with a remote: call list_projects with \`repository\` set to the remote URL (\`git remote get-url origin\`, falling back to the first remote); use the returned project(s) for every read and write. If none match, say the repository is not onboarded and offer to onboard it (ok-fine-onboard skill). 3) Otherwise (no repository, no shell, or no remote): call list_projects with \`team\` and/or \`query\` (or no arguments), pick the project(s) whose title, description, or metadata fit the question, and call search_concepts without \`project\` to search across all projects. Never run git commands and never say "not onboarded" or offer onboarding on this path. If several fit, read from all; ask before writing only when the write target is ambiguous. Search before planning or editing; record durable decisions, conventions, and runbooks afterwards.
 1. Discover: get_index (progressive disclosure) or search_concepts with \`project\` (omitting \`project\` searches all projects).
 2. Read: read_concept returns frontmatter, body, trust tier (proposed | unverified | machine-confirmed | human-reviewed), staleness, and links. Freshness comes first: a concept that is stale is a lead to re-check whatever its tier. For concepts with code sources, that means when code changed since \`sources[].commit\` or that commit is not an ancestor of HEAD (unmerged or rebased away); for concepts without code sources, fresh means \`stale_after\` is set and not past (additionally, when a tool available in the session can fetch a source's \`resource\` URL and report its last-modified time, a source modified after \`generated.at\` counts as drifted). Among fresh concepts prefer higher trust tiers. Knowledge about unmerged work is written at its usual id (e.g. \`decisions/<slug>\`, never over an existing concept) with a \`proposal: { ref: <URI> }\` frontmatter key; such concepts have trust tier \`proposed\` and are not current truth. When one you read has landed in the mainline, rewrite it as current truth without the \`proposal\` key and verify it; when its work was abandoned, set \`status: deprecated\`. Deprecated concepts are history; when code contradicts a concept, trust the code and update the concept.
 3. Write: write_concept with frontmatter containing \`type\` (e.g. Decision, Convention, Architecture, Component, Playbook, Interface, Reference) plus \`title\`, \`description\`, \`tags\`, and \`stale_after\` (ISO 8601, e.g. 180 days ahead). Record provenance in \`sources\` (each with \`resource\` and a stable \`id\`; code sources carry \`commit\`; non-code sources use a URL or stable URI \`resource\` without \`commit\`) and cite claims with footnotes [^id]. Link concepts with bundle-absolute links such as [orders](/tables/orders.md). After re-checking a concept against the code or sources, refresh \`sources[].commit\` and \`stale_after\` with write_concept, then call verify_concept.
@@ -85,7 +85,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
     {
       title: "List projects",
       description:
-        "Call first to pick the project. In a git repository pass `repository` (the remote URL); otherwise (no repository, e.g. desktop chat) call with no arguments and choose projects by title and description; a project named by the user or project instructions wins. Lists projects (OKF bundles) with concept and staleness counts and bound git repositories.",
+        "Call first to pick the project. In a git repository pass `repository` (the remote URL); outside a git repository (e.g. desktop chat), call with `team` and/or `query` (or no arguments) and choose by title, description, teams, domains, keywords; a project named by the user or project instructions wins. Lists projects (OKF bundles) with concept and staleness counts, bound git repositories, and routing metadata (teams, domains, audience, keywords, owners).",
       inputSchema: z.object({
         repository: z
           .string()
@@ -93,10 +93,17 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
           .describe(
             "Git remote URL of the current repository, e.g. the output of `git remote get-url origin`; returns only the projects bound to it. Omit outside a git repository.",
           ),
+        team: z.string().optional().describe("Case-insensitive match on the overview's `teams`"),
+        query: z
+          .string()
+          .optional()
+          .describe(
+            "Keywords matched against title, description, `domains`, and `keywords`; any term matches by word prefix",
+          ),
       }),
       annotations: readOnly,
     },
-    (a) => service.listProjects({ repository: a.repository }),
+    (a) => service.listProjects({ repository: a.repository, team: a.team, query: a.query }),
   );
 
   tool(
