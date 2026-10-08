@@ -103,7 +103,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       }),
       annotations: readOnly,
     },
-    (a) => service.listProjects({ repository: a.repository, team: a.team, query: a.query }),
+    (a) => service.listProjects(principal, { repository: a.repository, team: a.team, query: a.query }),
   );
 
   tool(
@@ -137,7 +137,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       inputSchema: z.object({ project, path: z.string().optional().describe("directory, default bundle root") }),
       annotations: readOnly,
     },
-    (a) => service.getIndex(a.project, a.path ?? ""),
+    (a) => service.getIndex(principal, a.project, a.path ?? ""),
   );
 
   tool(
@@ -150,7 +150,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       inputSchema: z.object({ project, id }),
       annotations: readOnly,
     },
-    (a) => service.readConcept(a.project, a.id),
+    (a) => service.readConcept(principal, a.project, a.id),
   );
 
   tool(
@@ -172,7 +172,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       }),
       annotations: readOnly,
     },
-    (a) => service.search(a),
+    (a) => service.search(principal, a),
   );
 
   tool(
@@ -184,7 +184,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       inputSchema: z.object({ project, id: id.optional(), limit }),
       annotations: readOnly,
     },
-    (a) => service.history(a.project, a.id, a.limit),
+    (a) => service.history(principal, a.project, a.id, a.limit),
   );
 
   tool(
@@ -196,7 +196,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       inputSchema: z.object({ project, path: z.string().describe("bundle-relative file path") }),
       annotations: readOnly,
     },
-    (a) => service.readFile(a.project, a.path),
+    (a) => service.readFile(principal, a.project, a.path),
   );
 
   tool(
@@ -208,7 +208,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       inputSchema: z.object({ project }),
       annotations: readOnly,
     },
-    (a) => service.lint(a.project),
+    (a) => service.lint(principal, a.project),
   );
 
   const conflictId = z.string().describe("Conflict id from list_conflicts or an unresolved_conflict lint issue");
@@ -223,7 +223,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       inputSchema: z.object({ project }),
       annotations: readOnly,
     },
-    (a) => service.listConflicts(a.project),
+    (a) => service.listConflicts(principal, a.project),
   );
 
   tool(
@@ -240,7 +240,7 @@ export function createMcpServer(service: KnowledgeService, principal: Principal,
       }),
       annotations: readOnly,
     },
-    (a) => service.readConflict(a.project, a.id, a.path),
+    (a) => service.readConflict(principal, a.project, a.id, a.path),
   );
 
   tool(

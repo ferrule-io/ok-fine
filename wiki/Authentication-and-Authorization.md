@@ -36,7 +36,7 @@ In `oidc` mode:
 | `okf:write` | read + write |
 | `okf:admin` | everything, including project deletion, archive import, and sync |
 
-Every authorized caller can see every project.
+By default, every authorized caller can see every project. Access can be restricted per project with `readGroups` and `writeGroups` (see [Project access control](#project-access-control)).
 
 To configure your provider:
 
@@ -68,6 +68,32 @@ A token passes the access policy when:
 If any configured policy check fails, the request is rejected with HTTP 403 (`insufficient_scope`). A warning is logged at startup if no access policy variables are set.
 
 In Helm, these correspond to `oauth.allowedSubjects`, `oauth.allowedEmails`, `oauth.requiredGroups`, `oauth.groupsClaim`, and `oauth.allowedClientIds` (as lists).
+
+## Project access control
+
+Access can be restricted per project based on IdP groups carried on the request principal (read from `OAUTH_GROUPS_CLAIM`, default `groups`). Project access rules are configured centrally via the `PROJECT_ACCESS` environment variable (or `PROJECT_ACCESS_FILE`, Helm `access.projects`), never in concept frontmatter where callers with write permissions could alter them:
+
+```json
+{
+  "hr": {
+    "readGroups": ["hr"],
+    "writeGroups": ["hr-admins"]
+  },
+  "finance": {
+    "readGroups": ["finance-readers", "finance-team"],
+    "writeGroups": ["finance-team"]
+  }
+}
+```
+
+- **Open by default:** Projects without configured rules (or with empty group lists) are accessible to all authenticated callers with appropriate scopes (`okf:read` / `okf:write`).
+- **Read access:** Allowed if a project has no `readGroups`, or if the caller's groups intersect `readGroups` (exact case-sensitive match).
+- **Write access:** Allowed if read access is allowed AND (project has no `writeGroups` or caller's groups intersect `writeGroups`) AND caller possesses write scope.
+- **Admin bypass:** Callers with the admin scope (`okf:admin`, `canAdmin=true`) bypass all project-level group restrictions.
+- **Existence hiding (404):** Unreadable projects return `project_not_found` (HTTP 404) on all read and write paths—the identical code and message returned when a project does not exist—so the existence of restricted projects is never leaked. `list_projects` automatically omits unreadable projects, `search_concepts` filters out concepts from unreadable projects before ranking and before applying `limit`, `orient` never returns unreadable projects or their concepts (and returns `project_not_found` when targeted at an unreadable project), and cross-project links into unreadable projects appear as if the target does not exist (`exists: false`), with inbound links from unreadable projects omitted.
+- **Forbidden writes (403):** Callers who can read a project but lack write group membership are rejected with `forbidden` (HTTP 403) when attempting mutations.
+- **Git remote access:** The single-repository git remote stores all project bundles together. Therefore, direct read access to the git remote provides full read access to every project. Restrict remote repository access accordingly.
+- **Interim sensitivity isolation:** For organizations requiring hard isolation for highly sensitive departments (such as HR or executive compensation), deploy a dedicated ok-fine instance backed by its own separate git repository and distinct MCP connector.
 
 # Web UI
 

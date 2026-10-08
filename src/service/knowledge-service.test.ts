@@ -87,7 +87,7 @@ describe("KnowledgeService", () => {
       content: "print(1)\n",
       actor: "test/1.0",
     });
-    const read = await service.readConcept("calc", "computations/revenue");
+    const read = await service.readConcept(alice, "calc", "computations/revenue");
     expect(read.issues.map((i) => i.code)).not.toContain("computation_file_missing");
   });
 
@@ -99,10 +99,10 @@ describe("KnowledgeService", () => {
     const attempts: Array<() => Promise<unknown>> = [
       () => service.deleteProject(alice, { project: "..", actor: "test/1.0" }),
       () => service.deleteProject(alice, { project: ".", actor: "test/1.0" }),
-      () => service.readFile("..", "canary.txt"),
-      () => service.readFile(".", "outside.txt"),
-      () => service.getProject(".."),
-      () => service.lint("../repo"),
+      () => service.readFile(alice, "..", "canary.txt"),
+      () => service.readFile(alice, ".", "outside.txt"),
+      () => service.getProject(alice, ".."),
+      () => service.lint(alice, "../repo"),
       () => service.writeFile(alice, { project: "..", path: "x.txt", content: "x", actor: "test/1.0" }),
     ];
     for (const attempt of attempts) {
@@ -129,16 +129,16 @@ describe("KnowledgeService", () => {
       actor: "test/1.0",
     });
 
-    const filtered = service.listProjects({ repository: "https://github.com/acme/shop" });
+    const filtered = service.listProjects(alice, { repository: "https://github.com/acme/shop" });
     expect(filtered.projects.map((p) => [p.project, p.repositories])).toEqual([["alpha", ["github.com/acme/shop"]]]);
 
-    const all = service.listProjects();
+    const all = service.listProjects(alice);
     expect(Object.fromEntries(all.projects.map((p) => [p.project, p.repositories]))).toEqual({
       alpha: ["github.com/acme/shop"],
       beta: [],
     });
 
-    expect(() => service.listProjects({ repository: "/tmp/shop" })).toThrowError(
+    expect(() => service.listProjects(alice, { repository: "/tmp/shop" })).toThrowError(
       expect.objectContaining({ code: "bad_request", status: 400 }),
     );
   });
@@ -218,14 +218,14 @@ describe("KnowledgeService", () => {
     });
 
     // 1. Normalized routing fields exposed on both getProject and listProjects
-    const details = await service.getProject("support-hub");
+    const details = await service.getProject(alice, "support-hub");
     expect(details.teams).toEqual(["Support", "tier-1"]);
     expect(details.domains).toEqual(["support-ops"]);
     expect(details.keywords).toEqual(["campaigns", "tickets"]);
     expect(details.audience).toEqual(["internal-agents", "staff"]);
     expect(details.owners).toEqual(["alice-lead", "bob-lead"]);
 
-    const all = service.listProjects();
+    const all = service.listProjects(alice);
     const summary = all.projects.find((p) => p.project === "support-hub");
     expect(summary).toMatchObject({
       teams: ["Support", "tier-1"],
@@ -235,7 +235,7 @@ describe("KnowledgeService", () => {
       owners: ["alice-lead", "bob-lead"],
     });
 
-    const unrelatedDetails = await service.getProject("unrelated-proj");
+    const unrelatedDetails = await service.getProject(alice, "unrelated-proj");
     expect(unrelatedDetails.teams).toEqual([]);
     expect(unrelatedDetails.domains).toEqual([]);
     expect(unrelatedDetails.keywords).toEqual([]);
@@ -243,61 +243,62 @@ describe("KnowledgeService", () => {
     expect(unrelatedDetails.owners).toEqual([]);
 
     // 2. Team filter: case-insensitive equality against any entry; returns [] on no match
-    expect(service.listProjects({ team: "support" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
-    expect(service.listProjects({ team: "SUPPORT" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
-    expect(service.listProjects({ team: "tier-1" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
-    expect(service.listProjects({ team: "nonexistent" }).projects.map((p) => p.project)).toEqual([]);
+    expect(service.listProjects(alice, { team: "support" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
+    expect(service.listProjects(alice, { team: "SUPPORT" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
+    expect(service.listProjects(alice, { team: "tier-1" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
+    expect(service.listProjects(alice, { team: "nonexistent" }).projects.map((p) => p.project)).toEqual([]);
 
     // 3. Query filter: domains, keywords (prefix campaign -> campaigns, ticket -> tickets), title, description
-    expect(service.listProjects({ query: "growth" }).projects.map((p) => p.project)).toEqual(["marketing-site"]);
-    expect(service.listProjects({ query: "infra" }).projects.map((p) => p.project)).toEqual(["platform-core"]);
-    expect(service.listProjects({ query: "campaign" }).projects.map((p) => p.project)).toEqual([
+    expect(service.listProjects(alice, { query: "growth" }).projects.map((p) => p.project)).toEqual(["marketing-site"]);
+    expect(service.listProjects(alice, { query: "infra" }).projects.map((p) => p.project)).toEqual(["platform-core"]);
+    expect(service.listProjects(alice, { query: "campaign" }).projects.map((p) => p.project)).toEqual([
       "marketing-site",
       "support-hub",
     ]);
-    expect(service.listProjects({ query: "ticket" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
-    expect(service.listProjects({ query: "ad" }).projects.map((p) => p.project)).toEqual(["marketing-site"]);
-    expect(service.listProjects({ query: "desk" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
-    expect(service.listProjects({ query: "zeta" }).projects.map((p) => p.project)).toEqual(["unrelated-proj"]);
+    expect(service.listProjects(alice, { query: "ticket" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
+    expect(service.listProjects(alice, { query: "ad" }).projects.map((p) => p.project)).toEqual(["marketing-site"]);
+    expect(service.listProjects(alice, { query: "desk" }).projects.map((p) => p.project)).toEqual(["support-hub"]);
+    expect(service.listProjects(alice, { query: "zeta" }).projects.map((p) => p.project)).toEqual(["unrelated-proj"]);
     // Query terms appearing only in owners or audience do not match
-    expect(service.listProjects({ query: "alice" }).projects).toEqual([]);
-    expect(service.listProjects({ query: "carol" }).projects).toEqual([]);
-    expect(service.listProjects({ query: "internal-agents" }).projects).toEqual([]);
-    expect(service.listProjects({ query: "developers" }).projects).toEqual([]);
+    expect(service.listProjects(alice, { query: "alice" }).projects).toEqual([]);
+    expect(service.listProjects(alice, { query: "carol" }).projects).toEqual([]);
+    expect(service.listProjects(alice, { query: "internal-agents" }).projects).toEqual([]);
+    expect(service.listProjects(alice, { query: "developers" }).projects).toEqual([]);
 
     // 4. Unfiltered and whitespace-only filters return all projects
-    expect(service.listProjects().projects.map((p) => p.project)).toEqual([
+    expect(service.listProjects(alice).projects.map((p) => p.project)).toEqual([
       "marketing-site",
       "platform-core",
       "support-hub",
       "unrelated-proj",
     ]);
-    expect(service.listProjects({ team: "   ", query: "   " }).projects.map((p) => p.project)).toEqual([
+    expect(service.listProjects(alice, { team: "   ", query: "   " }).projects.map((p) => p.project)).toEqual([
       "marketing-site",
       "platform-core",
       "support-hub",
       "unrelated-proj",
     ]);
-
     // 5. Combined filters AND together
-    expect(service.listProjects({ team: "support", query: "campaign" }).projects.map((p) => p.project)).toEqual([
+    expect(service.listProjects(alice, { team: "support", query: "campaign" }).projects.map((p) => p.project)).toEqual([
       "support-hub",
     ]);
-    expect(service.listProjects({ team: "marketing", query: "ticket" }).projects.map((p) => p.project)).toEqual([]);
+    expect(service.listProjects(alice, { team: "marketing", query: "ticket" }).projects.map((p) => p.project)).toEqual(
+      [],
+    );
 
     expect(
       service
-        .listProjects({ repository: "https://github.com/acme/marketing", team: "marketing" })
+        .listProjects(alice, { repository: "https://github.com/acme/marketing", team: "marketing" })
         .projects.map((p) => p.project),
     ).toEqual(["marketing-site"]);
     expect(
       service
-        .listProjects({ repository: "https://github.com/acme/marketing", team: "support" })
+        .listProjects(alice, { repository: "https://github.com/acme/marketing", team: "support" })
         .projects.map((p) => p.project),
     ).toEqual([]);
     expect(
       service
-        .listProjects({ repository: "git@github.com:Acme/Support.git", team: "support" })
+        .listProjects(alice, { repository: "git@github.com:Acme/Support.git", team: "support" })
         .projects.map((p) => p.project),
     ).toEqual(["support-hub"]);
   });
@@ -330,16 +331,16 @@ describe("KnowledgeService", () => {
     expect(writeRes.created).toBe(true);
 
     // 3. Read concept
-    const conceptView = await service.readConcept("demo", "tables/orders");
+    const conceptView = await service.readConcept(alice, "demo", "tables/orders");
     expect(conceptView.derived?.trustTier).toBe("unverified");
     expect(conceptView.derived?.title).toBe("Customer Orders");
 
     // 4. Verify root index.md lists directory, tables/index.md lists concept
-    const rootIndex = await service.getIndex("demo", "");
+    const rootIndex = await service.getIndex(alice, "demo", "");
     expect(rootIndex.markdown).toContain("# Directories");
     expect(rootIndex.markdown).toContain("* [tables](tables/) - 1 concept");
 
-    const tablesIndex = await service.getIndex("demo", "tables");
+    const tablesIndex = await service.getIndex(alice, "demo", "tables");
     expect(tablesIndex.markdown).toContain("# Reference");
     expect(tablesIndex.markdown).toContain("* [Customer Orders](orders.md) - Table of orders");
     // 5. Verify log.md has creation entry
@@ -485,7 +486,7 @@ describe("KnowledgeService", () => {
       actor: "agent/1.0",
     });
 
-    const v1 = await service.readConcept("demo", "doc");
+    const v1 = await service.readConcept(alice, "demo", "doc");
     const originalGenerated = v1.derived?.generatedAt;
     expect(v1.derived?.trustTier).toBe("unverified");
 
@@ -496,7 +497,7 @@ describe("KnowledgeService", () => {
       actor: "process:ci",
     });
 
-    const v2 = await service.readConcept("demo", "doc");
+    const v2 = await service.readConcept(alice, "demo", "doc");
     expect(v2.derived?.trustTier).toBe("machine-confirmed");
     expect(v2.derived?.generatedAt).toBe(originalGenerated);
 
@@ -507,7 +508,7 @@ describe("KnowledgeService", () => {
       actor: "human:alice",
     });
 
-    const v3 = await service.readConcept("demo", "doc");
+    const v3 = await service.readConcept(alice, "demo", "doc");
     expect(v3.derived?.trustTier).toBe("human-reviewed");
     expect(v3.derived?.generatedAt).toBe(originalGenerated);
     expect(Array.isArray(v3.frontmatter?.verified)).toBe(true);
@@ -552,7 +553,7 @@ describe("KnowledgeService", () => {
     });
 
     expect(res.ignoredKeys).toContain("verified");
-    const doc = await service.readConcept("demo", "doc");
+    const doc = await service.readConcept(alice, "demo", "doc");
     expect(doc.derived?.trustTier).toBe("human-reviewed");
   });
 
@@ -584,7 +585,7 @@ describe("KnowledgeService", () => {
     });
 
     // Search query "database"
-    const hits = await service.search({ query: "Database" });
+    const hits = await service.search(alice, { query: "Database" });
     expect(hits.results.length).toBe(2);
     expect(hits.results[0]?.id).toBe("doc1");
     expect(hits.results[1]?.id).toBe("doc2");
@@ -598,10 +599,10 @@ describe("KnowledgeService", () => {
       actor: "agent/1.0",
     });
 
-    const hitsWithoutDep = await service.search({ query: "Database" });
+    const hitsWithoutDep = await service.search(alice, { query: "Database" });
     expect(hitsWithoutDep.results.some((r) => r.id === "doc-dep")).toBe(false);
 
-    const hitsWithDep = await service.search({ query: "Database", status: "deprecated" });
+    const hitsWithDep = await service.search(alice, { query: "Database", status: "deprecated" });
     expect(hitsWithDep.results.some((r) => r.id === "doc-dep")).toBe(true);
 
     // Stale filter
@@ -617,7 +618,7 @@ describe("KnowledgeService", () => {
       actor: "agent/1.0",
     });
 
-    const staleOnly = await service.search({ stale: true });
+    const staleOnly = await service.search(alice, { stale: true });
     expect(staleOnly.results.map((r) => r.id)).toEqual(["doc-stale"]);
   });
 
@@ -648,7 +649,7 @@ describe("KnowledgeService", () => {
       actor: "agent/1.0",
     });
 
-    const bView = await service.readConcept("demo", "tables/b");
+    const bView = await service.readConcept(alice, "demo", "tables/b");
     expect(bView.links.inbound).toEqual(["a"]);
 
     // Delete B
@@ -660,11 +661,11 @@ describe("KnowledgeService", () => {
     expect(delRes.brokenInbound).toEqual(["a"]);
 
     // Lint A reports broken_link
-    const aView = await service.readConcept("demo", "a");
+    const aView = await service.readConcept(alice, "demo", "a");
     expect(aView.issues.some((i) => i.code === "broken_link")).toBe(true);
 
     // Directory tables has no more concepts, so tables/index.md should be pruned
-    await expect(service.getIndex("demo", "tables")).rejects.toThrow();
+    await expect(service.getIndex(alice, "demo", "tables")).rejects.toThrow();
 
     // Recreating B restores A's inbound link without A being rewritten
     await service.writeConcept(alice, {
@@ -674,7 +675,7 @@ describe("KnowledgeService", () => {
       body: "B table again",
       actor: "agent/1.0",
     });
-    expect((await service.readConcept("demo", "tables/b")).links.inbound).toEqual(["a"]);
+    expect((await service.readConcept(alice, "demo", "tables/b")).links.inbound).toEqual(["a"]);
   });
 
   it("cross-project links: outbound includes cross-project target, target inbound includes okf://source, missing target warns, and updates prune", async () => {
@@ -712,7 +713,7 @@ describe("KnowledgeService", () => {
     expect(guideWrite.issues.some((i) => i.code === "broken_cross_link")).toBe(false);
 
     // Read source in support: outbound shows cross-project link
-    const guideView = await service.readConcept("support", "guide");
+    const guideView = await service.readConcept(alice, "support", "guide");
     expect(guideView.links.outbound).toContainEqual({
       project: "org",
       id: "glossary/tier",
@@ -720,13 +721,13 @@ describe("KnowledgeService", () => {
     });
 
     // Read target in org: inbound shows cross-project link okf://support/guide
-    const tierView = await service.readConcept("org", "glossary/tier");
+    const tierView = await service.readConcept(alice, "org", "glossary/tier");
     expect(tierView.links.inbound).toEqual(["okf://support/guide"]);
 
     // Rebuilding / resyncing org preserves cross-project inbound links from support
     const orgTree = await storage.tree("org");
     await catalog.rebuildProject("org", bundleSource(storage, "org", orgTree));
-    const tierAfterRebuild = await service.readConcept("org", "glossary/tier");
+    const tierAfterRebuild = await service.readConcept(alice, "org", "glossary/tier");
     expect(tierAfterRebuild.links.inbound).toEqual(["okf://support/guide"]);
     // Missing target gives a lint warning and write still succeeds
     const missingWrite = await service.writeConcept(alice, {
@@ -738,7 +739,7 @@ describe("KnowledgeService", () => {
     });
     expect(missingWrite.issues.some((i) => i.code === "broken_cross_link" && i.severity === "warning")).toBe(true);
 
-    const escalationsView = await service.readConcept("support", "escalations");
+    const escalationsView = await service.readConcept(alice, "support", "escalations");
     expect(escalationsView.links.outbound).toContainEqual({
       project: "org",
       id: "missing/policy",
@@ -754,9 +755,8 @@ describe("KnowledgeService", () => {
       body: "No links here anymore.",
       actor: "agent/1.0",
     });
-    const tierAfterUpdate = await service.readConcept("org", "glossary/tier");
+    const tierAfterUpdate = await service.readConcept(alice, "org", "glossary/tier");
     expect(tierAfterUpdate.links.inbound).toEqual([]);
-
     // Restore link
     await service.writeConcept(alice, {
       project: "support",
@@ -765,7 +765,7 @@ describe("KnowledgeService", () => {
       body: "See [Tiers](okf://org/glossary/tier) again.",
       actor: "agent/1.0",
     });
-    expect((await service.readConcept("org", "glossary/tier")).links.inbound).toEqual(["okf://support/guide"]);
+    expect((await service.readConcept(alice, "org", "glossary/tier")).links.inbound).toEqual(["okf://support/guide"]);
 
     // Deleting source concept cleans up target inbound links
     await service.deleteConcept(alice, {
@@ -773,7 +773,7 @@ describe("KnowledgeService", () => {
       id: "guide",
       actor: "agent/1.0",
     });
-    expect((await service.readConcept("org", "glossary/tier")).links.inbound).toEqual([]);
+    expect((await service.readConcept(alice, "org", "glossary/tier")).links.inbound).toEqual([]);
 
     // Recreate source link and test deleteProject
     await service.writeConcept(alice, {
@@ -783,14 +783,14 @@ describe("KnowledgeService", () => {
       body: "See [Tiers](okf://org/glossary/tier).",
       actor: "agent/1.0",
     });
-    expect((await service.readConcept("org", "glossary/tier")).links.inbound).toEqual(["okf://support/guide"]);
+    expect((await service.readConcept(alice, "org", "glossary/tier")).links.inbound).toEqual(["okf://support/guide"]);
 
     // Deleting source project support cleans up inbound links on org
     await service.deleteProject(alice, {
       project: "support",
       actor: "human:alice",
     });
-    expect((await service.readConcept("org", "glossary/tier")).links.inbound).toEqual([]);
+    expect((await service.readConcept(alice, "org", "glossary/tier")).links.inbound).toEqual([]);
   });
 
   it("remote sync with bare repo: write propagation, external clone push, conflict branch preservation", async () => {
@@ -903,9 +903,9 @@ title: Remote X
     const localHead = (await storage.git.run(["rev-parse", "HEAD"])).stdout.trim();
     const originMain = (await storage.git.run(["rev-parse", "origin/main"])).stdout.trim();
     expect(localHead).toBe(originMain);
-    const afterSync = await service.readConcept("alpha", "concept-x");
+    const afterSync = await service.readConcept(alice, "alpha", "concept-x");
     expect(afterSync.derived?.title).toBe("Remote X");
-    expect((await service.search({ query: "Remote" })).results.map((r) => r.id)).toContain("concept-x");
+    expect((await service.search(alice, { query: "Remote" })).results.map((r) => r.id)).toContain("concept-x");
 
     // The conflict surfaces in lint and on the concept, scoped to its project
     const conflictId = branch.split("/").pop() ?? "";
@@ -915,22 +915,24 @@ title: Remote X
       path: "concept-x.md",
       message: expect.stringContaining(conflictId),
     };
-    expect((await service.lint("alpha")).issues).toContainEqual(conflictIssue);
+    expect((await service.lint(alice, "alpha")).issues).toContainEqual(conflictIssue);
     expect(afterSync.issues).toContainEqual(conflictIssue);
-    const listed = await service.listConflicts("alpha");
+    const listed = await service.listConflicts(alice, "alpha");
     expect(listed.conflicts.map((c) => [c.id, c.files, c.commits.map((h) => h.actor)])).toEqual([
       [conflictId, [{ path: "concept-x.md", change: "added", divergent: true }], ["agent/1.0"]],
     ]);
     await service.createProject(alice, { project: "beta", title: "Beta", actor: "human:alice" });
-    expect((await service.listConflicts("beta")).conflicts).toEqual([]);
-    expect((await service.lint("beta")).issues.map((i) => i.code)).not.toContain("unresolved_conflict");
+    expect((await service.listConflicts(alice, "beta")).conflicts).toEqual([]);
+    expect((await service.lint(alice, "beta")).issues.map((i) => i.code)).not.toContain("unresolved_conflict");
 
-    const sides = await service.readConflict("alpha", conflictId, "concept-x.md");
+    const sides = await service.readConflict(alice, "alpha", conflictId, "concept-x.md");
     expect(sides.preserved).toContain("title: Local X");
     expect(sides.base).toBeNull();
     expect(sides.current?.content).toContain("title: Remote X");
     expect(sides.current?.revision).toBe(afterSync.revision);
-    await expect(service.readConflict("alpha", "20260101T000000Z-000000000000", "concept-x.md")).rejects.toMatchObject({
+    await expect(
+      service.readConflict(alice, "alpha", "20260101T000000Z-000000000000", "concept-x.md"),
+    ).rejects.toMatchObject({
       code: "not_found",
     });
 
@@ -946,7 +948,7 @@ title: Remote X
     await expect(
       service.resolveConflict(alice, { project: "alpha", id: conflictId, paths: [], actor: "agent/1.0" }),
     ).rejects.toMatchObject({ code: "bad_request", details: { unacknowledged: ["concept-x.md"] } });
-    expect((await service.listConflicts("alpha")).conflicts).toHaveLength(1);
+    expect((await service.listConflicts(alice, "alpha")).conflicts).toHaveLength(1);
 
     const resolved = await service.resolveConflict(alice, {
       project: "alpha",
@@ -956,13 +958,13 @@ title: Remote X
       message: "kept both bodies",
     });
     expect(resolved.pushed).toBe(true);
-    expect((await service.listConflicts("alpha")).conflicts).toEqual([]);
-    expect((await service.readConcept("alpha", "concept-x")).issues.map((i) => i.code)).not.toContain(
+    expect((await service.listConflicts(alice, "alpha")).conflicts).toEqual([]);
+    expect((await service.readConcept(alice, "alpha", "concept-x")).issues.map((i) => i.code)).not.toContain(
       "unresolved_conflict",
     );
     expect(execSync("git for-each-ref refs/heads/ok-fine/", { cwd: bareDir }).toString("utf8")).toBe("");
     expect(execSync("git for-each-ref refs/ok-fine/resolved/", { cwd: storage.repoDir }).toString("utf8")).toBe("");
-    expect((await service.readFile("alpha", "log.md")).content).toContain(
+    expect((await service.readFile(alice, "alpha", "log.md")).content).toContain(
       `**Conflict resolution**: Resolved conflict \`${conflictId}\` (by agent/1.0). kept both bodies`,
     );
     await expect(
@@ -996,7 +998,7 @@ title: Remote X
     });
 
     // Export archive
-    const stream = service.exportArchive("source");
+    const stream = service.exportArchive(alice, "source");
     const chunks: Buffer[] = [];
     for await (const chunk of stream) {
       chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
@@ -1126,7 +1128,7 @@ title: Remote X
     });
     const afterWrite = Date.now();
 
-    const autoView = await configuredService.readConcept("proj-configured", "concepts/auto-stale");
+    const autoView = await configuredService.readConcept(alice, "proj-configured", "concepts/auto-stale");
     const autoStaleAfter = autoView.frontmatter?.stale_after;
     expect(typeof autoStaleAfter).toBe("string");
     const parsedAuto = typeof autoStaleAfter === "string" ? Date.parse(autoStaleAfter) : Number.NaN;
@@ -1146,7 +1148,7 @@ title: Remote X
       body: "Body content",
       actor: "agent/1.0",
     });
-    const nullView = await configuredService.readConcept("proj-configured", "concepts/null-stale");
+    const nullView = await configuredService.readConcept(alice, "proj-configured", "concepts/null-stale");
     expect(nullView.frontmatter?.stale_after).toBeNull();
     expect(nullView.derived?.staleAfter).toBeNull();
 
@@ -1159,7 +1161,7 @@ title: Remote X
       body: "Body content",
       actor: "agent/1.0",
     });
-    const explicitView = await configuredService.readConcept("proj-configured", "concepts/explicit-stale");
+    const explicitView = await configuredService.readConcept(alice, "proj-configured", "concepts/explicit-stale");
     expect(explicitView.frontmatter?.stale_after).toBe(explicitTimestamp);
     expect(explicitView.derived?.staleAfter).toBe(explicitTimestamp);
 
@@ -1183,7 +1185,7 @@ title: Remote X
       actor: "agent/1.0",
       expectedRevision: explicitView.revision,
     });
-    const updatedView = await configuredService.readConcept("proj-configured", "concepts/explicit-stale");
+    const updatedView = await configuredService.readConcept(alice, "proj-configured", "concepts/explicit-stale");
     expect(updatedView.frontmatter?.stale_after).not.toBe(explicitTimestamp);
     const updatedStaleAfter = updatedView.frontmatter?.stale_after;
     expect(typeof updatedStaleAfter).toBe("string");
@@ -1201,7 +1203,7 @@ title: Remote X
       body: "Body content",
       actor: "agent/1.0",
     });
-    const unconfiguredView = await unconfiguredService.readConcept("proj-unset", "concepts/no-stale");
+    const unconfiguredView = await unconfiguredService.readConcept(alice, "proj-unset", "concepts/no-stale");
     expect(unconfiguredView.frontmatter?.stale_after).toBeUndefined();
     expect(unconfiguredView.derived?.staleAfter).toBeNull();
   });
@@ -1230,22 +1232,22 @@ title: Remote X
 
     await service.initialize();
 
-    const moved = await service.readConcept("demo", "decisions/foo");
+    const moved = await service.readConcept(alice, "demo", "decisions/foo");
     expect(moved.revision).toBe(foo.revision);
     expect(moved.derived?.trustTier).toBe("proposed");
-    await expect(service.readConcept("demo", "proposals/foo")).rejects.toMatchObject({ code: "not_found" });
-    const oldBar = await service.readConcept("demo", "decisions/bar-proposal-2");
+    await expect(service.readConcept(alice, "demo", "proposals/foo")).rejects.toMatchObject({ code: "not_found" });
+    const oldBar = await service.readConcept(alice, "demo", "decisions/bar-proposal-2");
     expect(oldBar.frontmatter?.title).toBe("Old bar");
     expect(oldBar.frontmatter?.status).toBe("deprecated");
-    expect((await service.readConcept("demo", "decisions/bar-proposal")).frontmatter?.title).toBe("Taken");
-    expect((await service.readConcept("demo", "proposals/plain")).frontmatter?.title).toBe("Plain");
+    expect((await service.readConcept(alice, "demo", "decisions/bar-proposal")).frontmatter?.title).toBe("Taken");
+    expect((await service.readConcept(alice, "demo", "proposals/plain")).frontmatter?.title).toBe("Plain");
     expect(execSync("git log -1 --format=%s", { cwd: repoDir }).toString("utf8").trim()).toBe(
       "okf: migrate legacy proposals",
     );
     expect(await readFile(join(repoDir, "demo", "log.md"), "utf8")).toContain(
       "**Move**: Moved `proposals/foo` to [Foo](/decisions/foo.md) (by process:ok-fine).",
     );
-    const proposed = await service.search({ project: "demo", trustTier: "proposed" });
+    const proposed = await service.search(alice, { project: "demo", trustTier: "proposed" });
     expect(proposed.results.map((r) => r.id)).toContain("decisions/foo");
 
     const head = execSync("git rev-parse HEAD", { cwd: repoDir }).toString("utf8").trim();
@@ -1474,6 +1476,542 @@ title: Remote X
         code: "bad_request",
         status: 400,
       });
+    });
+  });
+
+  describe("Project access control", () => {
+    const outsider: Principal = {
+      subject: "bob",
+      clientId: "app",
+      identity: "bob@example.com",
+      groups: ["engineering"],
+      scopes: ["okf:read", "okf:write"],
+      canRead: true,
+      canWrite: true,
+      canAdmin: false,
+    };
+
+    const hrReader: Principal = {
+      subject: "carol",
+      clientId: "app",
+      identity: "carol@example.com",
+      groups: ["hr"],
+      scopes: ["okf:read", "okf:write"],
+      canRead: true,
+      canWrite: true,
+      canAdmin: false,
+    };
+
+    const hrAdmin: Principal = {
+      subject: "dave",
+      clientId: "app",
+      identity: "dave@example.com",
+      groups: ["hr", "hr-admins"],
+      scopes: ["okf:read", "okf:write"],
+      canRead: true,
+      canWrite: true,
+      canAdmin: false,
+    };
+
+    const superAdmin: Principal = {
+      subject: "eve",
+      clientId: "app",
+      identity: "eve@example.com",
+      groups: [],
+      scopes: ["okf:read", "okf:write", "okf:admin"],
+      canRead: true,
+      canWrite: true,
+      canAdmin: true,
+    };
+
+    async function setupAclService() {
+      const accessConfig = JSON.stringify({
+        hr: {
+          readGroups: ["hr"],
+          writeGroups: ["hr-admins"],
+        },
+      });
+      const ctx = await setupService({ PROJECT_ACCESS: accessConfig });
+      const { service } = ctx;
+
+      // Create restricted project 'hr'
+      await service.createProject(alice, { project: "hr", title: "HR Department", actor: "human:alice" });
+      await service.writeConcept(alice, {
+        project: "hr",
+        id: "policies/compensation",
+        frontmatter: { type: "Policy", title: "Executive Compensation" },
+        body: "Executive compensation database salary plan.\n",
+        actor: "human:alice",
+      });
+      await service.writeFile(alice, {
+        project: "hr",
+        path: "notes.txt",
+        content: "HR private notes\n",
+        actor: "human:alice",
+      });
+
+      // Create open project 'public-proj'
+      await service.createProject(alice, { project: "public-proj", title: "Public Project", actor: "human:alice" });
+      await service.writeConcept(alice, {
+        project: "public-proj",
+        id: "guides/compensation",
+        frontmatter: { type: "Guide", title: "General Compensation Overview" },
+        body: "Company compensation database salary structure.\n",
+        actor: "human:alice",
+      });
+
+      return ctx;
+    }
+
+    it("listProjects omits unreadable projects and includes them for authorized callers", async () => {
+      const { service } = await setupAclService();
+
+      expect(service.listProjects(outsider).projects.map((p) => p.project)).toEqual(["public-proj"]);
+      expect(
+        service
+          .listProjects(hrReader)
+          .projects.map((p) => p.project)
+          .sort(),
+      ).toEqual(["hr", "public-proj"]);
+      expect(
+        service
+          .listProjects(hrAdmin)
+          .projects.map((p) => p.project)
+          .sort(),
+      ).toEqual(["hr", "public-proj"]);
+      expect(
+        service
+          .listProjects(superAdmin)
+          .projects.map((p) => p.project)
+          .sort(),
+      ).toEqual(["hr", "public-proj"]);
+    });
+
+    it("read paths reject caller outside readGroups with project_not_found (404)", async () => {
+      const { service } = await setupAclService();
+
+      await expect(service.getProject(outsider, "hr")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      await expect(service.getIndex(outsider, "hr", "")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      await expect(service.readConcept(outsider, "hr", "policies/compensation")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      await expect(service.readFile(outsider, "hr", "notes.txt")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      await expect(service.history(outsider, "hr")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      await expect(service.lint(outsider, "hr")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      await expect(service.listConflicts(outsider, "hr")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      await expect(service.readConflict(outsider, "hr", "c1", "notes.txt")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      expect(() => service.exportArchive(outsider, "hr")).toThrowError(
+        expect.objectContaining({ code: "project_not_found", status: 404 }),
+      );
+    });
+
+    it("search never returns concepts from unreadable projects and limit applies after filtering", async () => {
+      const { service } = await setupAclService();
+
+      // Direct project search fails with 404
+      await expect(service.search(outsider, { project: "hr" })).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      // Searching for term unique to restricted project yields 0 results for outsider
+      const executiveHits = await service.search(outsider, { query: "Executive" });
+      expect(executiveHits.results).toHaveLength(0);
+
+      // But hrReader finds it
+      const hrHits = await service.search(hrReader, { query: "Executive" });
+      expect(hrHits.results.map((r) => r.id)).toContain("policies/compensation");
+
+      // Query matching both: hr has better title match ("Executive Compensation"), but limit 1 returns public-proj
+      const compHits = await service.search(outsider, { query: "Compensation", limit: 1 });
+      expect(compHits.results).toHaveLength(1);
+      expect(compHits.results[0]?.project).toBe("public-proj");
+      expect(compHits.results[0]?.id).toBe("guides/compensation");
+    });
+
+    it("write paths reject caller outside readGroups with project_not_found or forbidden without leaking existence", async () => {
+      const { service } = await setupAclService();
+
+      // Mutation paths return project_not_found (404) with "call create_project first"
+      await expect(
+        service.writeConcept(outsider, {
+          project: "hr",
+          id: "new-doc",
+          frontmatter: { type: "Doc", title: "New" },
+          body: "Body",
+          actor: "human:bob@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "project_not_found", status: 404 });
+
+      await expect(
+        service.writeFile(outsider, {
+          project: "hr",
+          path: "file.txt",
+          content: "Body",
+          actor: "human:bob@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "project_not_found", status: 404 });
+
+      await expect(
+        service.deleteConcept(outsider, {
+          project: "hr",
+          id: "policies/compensation",
+          actor: "human:bob@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "project_not_found", status: 404 });
+
+      await expect(
+        service.deleteFile(outsider, {
+          project: "hr",
+          path: "notes.txt",
+          actor: "human:bob@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "project_not_found", status: 404 });
+
+      await expect(
+        service.verifyConcept(outsider, {
+          project: "hr",
+          id: "policies/compensation",
+          actor: "human:bob@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "project_not_found", status: 404 });
+
+      await expect(
+        service.deleteProject(outsider, {
+          project: "hr",
+          actor: "human:bob@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "project_not_found", status: 404 });
+
+      await expect(
+        service.resolveConflict(outsider, {
+          project: "hr",
+          id: "c1",
+          paths: ["notes.txt"],
+          actor: "human:bob@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "project_not_found", status: 404 });
+
+      await expect(
+        service.importArchive(outsider, {
+          project: "hr",
+          archive: Buffer.from("dummy"),
+          actor: "human:bob@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "project_not_found", status: 404 });
+
+      // createProject on restricted project name fails with project_not_found (404), NOT already_exists (409)
+      await expect(
+        service.createProject(outsider, {
+          project: "hr",
+          title: "HR",
+          actor: "human:bob@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "project_not_found", status: 404 });
+    });
+
+    it("reader-but-not-writer succeeds on read paths and gets forbidden (403) on writes", async () => {
+      const { service } = await setupAclService();
+
+      // Read paths succeed
+      const proj = await service.getProject(hrReader, "hr");
+      expect(proj.title).toBe("HR Department");
+      const concept = await service.readConcept(hrReader, "hr", "policies/compensation");
+      expect(concept.derived?.title).toBe("Executive Compensation");
+      const file = await service.readFile(hrReader, "hr", "notes.txt");
+      expect(file.content).toBe("HR private notes\n");
+
+      // Write paths fail with forbidden 403
+      await expect(
+        service.writeConcept(hrReader, {
+          project: "hr",
+          id: "new-doc",
+          frontmatter: { type: "Doc", title: "New" },
+          body: "Body",
+          actor: "human:carol@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+
+      await expect(
+        service.writeFile(hrReader, {
+          project: "hr",
+          path: "file.txt",
+          content: "Body",
+          actor: "human:carol@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+
+      await expect(
+        service.deleteConcept(hrReader, {
+          project: "hr",
+          id: "policies/compensation",
+          actor: "human:carol@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+
+      await expect(
+        service.deleteFile(hrReader, {
+          project: "hr",
+          path: "notes.txt",
+          actor: "human:carol@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+
+      await expect(
+        service.verifyConcept(hrReader, {
+          project: "hr",
+          id: "policies/compensation",
+          actor: "human:carol@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+
+      await expect(
+        service.deleteProject(hrReader, {
+          project: "hr",
+          actor: "human:carol@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+
+      await expect(
+        service.createProject(hrReader, {
+          project: "hr",
+          title: "HR",
+          actor: "human:carol@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+
+      await expect(
+        service.resolveConflict(hrReader, {
+          project: "hr",
+          id: "c1",
+          paths: ["notes.txt"],
+          actor: "human:carol@example.com",
+        }),
+      ).rejects.toMatchObject({ code: "forbidden", status: 403 });
+    });
+
+    it("write member and superAdmin succeed on read and write paths", async () => {
+      const { service } = await setupAclService();
+
+      // hrAdmin (member of hr and hr-admins) can write
+      const writeRes = await service.writeConcept(hrAdmin, {
+        project: "hr",
+        id: "policies/bonus",
+        frontmatter: { type: "Policy", title: "Bonus Policy" },
+        body: "Bonus details\n",
+        actor: "human:dave@example.com",
+      });
+      expect(writeRes.created).toBe(true);
+
+      const verified = await service.verifyConcept(hrAdmin, {
+        project: "hr",
+        id: "policies/bonus",
+        actor: "human:dave@example.com",
+      });
+      expect(verified.trustTier).toBe("human-reviewed");
+
+      // superAdmin (okf:admin) can write and delete
+      const adminWrite = await service.writeFile(superAdmin, {
+        project: "hr",
+        path: "admin-note.txt",
+        content: "Admin note\n",
+        actor: "human:eve@example.com",
+      });
+      expect(adminWrite.revision).toBeDefined();
+
+      const adminRead = await service.readFile(superAdmin, "hr", "admin-note.txt");
+      expect(adminRead.content).toBe("Admin note\n");
+
+      // superAdmin can delete
+      const delRes = await service.deleteFile(superAdmin, {
+        project: "hr",
+        path: "admin-note.txt",
+        actor: "human:eve@example.com",
+      });
+      expect(delRes.path).toBe("admin-note.txt");
+      await expect(service.readFile(superAdmin, "hr", "admin-note.txt")).rejects.toMatchObject({
+        code: "not_found",
+        status: 404,
+      });
+    });
+
+    it("editing overview frontmatter cannot change access control", async () => {
+      const { service } = await setupAclService();
+
+      // hrAdmin edits overview frontmatter trying to open readGroups to everyone
+      await service.writeConcept(hrAdmin, {
+        project: "hr",
+        id: "overview",
+        frontmatter: {
+          type: "Project",
+          title: "HR Department",
+          readGroups: ["everyone", "engineering"],
+          writeGroups: [],
+        },
+        body: "# Tampered Overview\n",
+        actor: "human:dave@example.com",
+      });
+
+      // Outsider still cannot read 'hr'; config is the sole source of truth!
+      await expect(service.getProject(outsider, "hr")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      await expect(service.readConcept(outsider, "hr", "policies/compensation")).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+      expect(service.listProjects(outsider).projects.map((p) => p.project)).not.toContain("hr");
+    });
+
+    it("orient never returns a restricted project or its concepts to an outsider (but does to a member and admin)", async () => {
+      const { service } = await setupAclService();
+
+      // Outsider asks about executive compensation: only public-proj appears, hr is omitted
+      const outsiderRes = await service.orient(outsider, { question: "executive compensation" });
+      expect(outsiderRes.projects.map((p) => p.project)).not.toContain("hr");
+      for (const proj of outsiderRes.projects) {
+        expect(proj.concepts.map((c) => c.id)).not.toContain("policies/compensation");
+      }
+
+      // Member (hrReader) sees hr and its concepts
+      const memberRes = await service.orient(hrReader, { question: "executive compensation" });
+      const hrHit = memberRes.projects.find((p) => p.project === "hr");
+      expect(hrHit).toBeDefined();
+      expect(hrHit?.concepts.some((c) => c.id === "policies/compensation")).toBe(true);
+
+      // SuperAdmin also sees hr
+      const adminRes = await service.orient(superAdmin, { question: "executive compensation" });
+      expect(adminRes.projects.map((p) => p.project)).toContain("hr");
+
+      // An unreadable hub project is omitted when caller cannot read it
+      const { service: hubAclService } = await setupService({
+        HUB_PROJECT: "secret-hub",
+        PROJECT_ACCESS: JSON.stringify({ "secret-hub": { readGroups: ["secret-team"], writeGroups: [] } }),
+      });
+      await hubAclService.createProject(alice, { project: "secret-hub", title: "Secret Hub", actor: "human:alice" });
+      const outsiderHubRes = await hubAclService.orient(outsider, { question: "anything" });
+      expect(outsiderHubRes.projects.map((p) => p.project)).not.toContain("secret-hub");
+    });
+
+    it("orient with project = restricted returns project_not_found for outsider", async () => {
+      const { service } = await setupAclService();
+
+      await expect(service.orient(outsider, { question: "compensation", project: "hr" })).rejects.toMatchObject({
+        code: "project_not_found",
+        status: 404,
+      });
+
+      // Member can orient on hr
+      const memberRes = await service.orient(hrReader, { question: "compensation", project: "hr" });
+      expect(memberRes.projects.map((p) => p.project)).toEqual(["hr"]);
+    });
+
+    it("readConcept of a support concept linking okf://hr/x shows exists:false for outsider and exists:true for member", async () => {
+      const { service } = await setupAclService();
+
+      await service.createProject(alice, { project: "support", title: "Support", actor: "human:alice" });
+      await service.writeConcept(alice, {
+        project: "support",
+        id: "escalations",
+        frontmatter: { type: "Playbook", title: "Escalations" },
+        body: "See [Comp](okf://hr/policies/compensation).\n",
+        actor: "human:alice",
+      });
+
+      // Outsider reading support/escalations sees exists: false
+      const outsiderView = await service.readConcept(outsider, "support", "escalations");
+      const linkOutsider = outsiderView.links.outbound.find(
+        (l) => l.project === "hr" && l.id === "policies/compensation",
+      );
+      expect(linkOutsider).toBeDefined();
+      expect(linkOutsider).toEqual({
+        project: "hr",
+        id: "policies/compensation",
+        exists: false,
+      });
+
+      // Member (hrReader) reading support/escalations sees exists: true
+      const memberView = await service.readConcept(hrReader, "support", "escalations");
+      const linkMember = memberView.links.outbound.find((l) => l.project === "hr" && l.id === "policies/compensation");
+      expect(linkMember).toBeDefined();
+      expect(linkMember).toEqual({
+        project: "hr",
+        id: "policies/compensation",
+        exists: true,
+      });
+    });
+
+    it("inbound list of an open concept omits okf://hr/... sources for outsiders", async () => {
+      const { service } = await setupAclService();
+
+      // Write concept in hr linking to public-proj/guides/compensation
+      await service.writeConcept(alice, {
+        project: "hr",
+        id: "source-doc",
+        frontmatter: { type: "Note", title: "HR Source" },
+        body: "See [Public Guide](okf://public-proj/guides/compensation).\n",
+        actor: "human:alice",
+      });
+
+      // Outsider reading public-proj/guides/compensation does not see inbound link from hr
+      const outsiderView = await service.readConcept(outsider, "public-proj", "guides/compensation");
+      expect(outsiderView.links.inbound).not.toContain("okf://hr/source-doc");
+
+      // Member reading public-proj/guides/compensation sees inbound link from hr
+      const memberView = await service.readConcept(hrReader, "public-proj", "guides/compensation");
+      expect(memberView.links.inbound).toContain("okf://hr/source-doc");
+    });
+
+    it("lint for outsider reports the hr link the same as a missing target", async () => {
+      const { service } = await setupAclService();
+
+      await service.createProject(alice, { project: "support", title: "Support", actor: "human:alice" });
+      await service.writeConcept(alice, {
+        project: "support",
+        id: "escalations",
+        frontmatter: { type: "Playbook", title: "Escalations" },
+        body: "See [Comp](okf://hr/policies/compensation).\n",
+        actor: "human:alice",
+      });
+
+      // Outsider linting support gets broken_cross_link warning indistinguishable from a missing target
+      const outsiderLint = await service.lint(outsider, "support");
+      const brokenWarningOutsider = outsiderLint.issues.find(
+        (i) => i.code === "broken_cross_link" && i.path === "escalations.md",
+      );
+      expect(brokenWarningOutsider).toBeDefined();
+      expect(brokenWarningOutsider?.message).toBe(
+        'cross-project link to "okf://hr/policies/compensation" does not exist',
+      );
+
+      // Member linting support gets NO broken_cross_link warning
+      const memberLint = await service.lint(hrReader, "support");
+      const brokenWarningMember = memberLint.issues.find(
+        (i) => i.code === "broken_cross_link" && i.path === "escalations.md",
+      );
+      expect(brokenWarningMember).toBeUndefined();
     });
   });
 });

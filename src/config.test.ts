@@ -1,5 +1,8 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "./config.js";
+import { loadConfig, loadStorageConfig } from "./config.js";
 
 const required = { PUBLIC_BASE_URL: "https://okf.example.com/", OAUTH_ISSUER: "https://idp.example.com" };
 
@@ -253,6 +256,101 @@ describe("loadConfig", () => {
       expect(loadConfig(required).hubProject).toBe("org");
       expect(loadConfig({ ...required, HUB_PROJECT: "corp" }).hubProject).toBe("corp");
       expect(loadConfig({ ...required, HUB_PROJECT: "   " }).hubProject).toBe("org");
+    });
+  });
+
+  describe("ProjectAccess parsing", () => {
+    it("defaults projectAccess to {} when unset", () => {
+      const config = loadConfig(required);
+      expect(config.projectAccess).toEqual({});
+      const storageConfig = loadStorageConfig({});
+      expect(storageConfig.projectAccess).toEqual({});
+    });
+
+    it("parses valid PROJECT_ACCESS JSON with readGroups and writeGroups", () => {
+      const accessJson = JSON.stringify({
+        hr: { readGroups: ["hr"], writeGroups: ["hr-admins"] },
+        finance: { readGroups: ["finance-readers"], writeGroups: ["finance-writers"] },
+      });
+      const config = loadConfig({ ...required, PROJECT_ACCESS: accessJson });
+      expect(config.projectAccess).toEqual({
+        hr: { readGroups: ["hr"], writeGroups: ["hr-admins"] },
+        finance: { readGroups: ["finance-readers"], writeGroups: ["finance-writers"] },
+      });
+    });
+
+    it("defaults omitted readGroups and writeGroups to empty arrays", () => {
+      const accessJson = JSON.stringify({
+        open: {},
+        "read-only": { readGroups: ["readers"] },
+        "write-only": { writeGroups: ["writers"] },
+      });
+      const config = loadConfig({ ...required, PROJECT_ACCESS: accessJson });
+      expect(config.projectAccess).toEqual({
+        open: { readGroups: [], writeGroups: [] },
+        "read-only": { readGroups: ["readers"], writeGroups: [] },
+        "write-only": { readGroups: [], writeGroups: ["writers"] },
+      });
+    });
+
+    it("parses valid PROJECT_ACCESS_FILE", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "okf-config-test-"));
+      const filePath = join(dir, "access.json");
+      try {
+        await writeFile(filePath, JSON.stringify({ hr: { readGroups: ["hr"], writeGroups: ["hr-admins"] } }));
+        const config = loadConfig({ ...required, PROJECT_ACCESS_FILE: filePath });
+        expect(config.projectAccess).toEqual({
+          hr: { readGroups: ["hr"], writeGroups: ["hr-admins"] },
+        });
+        const storageConfig = loadStorageConfig({ PROJECT_ACCESS_FILE: filePath });
+        expect(storageConfig.projectAccess).toEqual({
+          hr: { readGroups: ["hr"], writeGroups: ["hr-admins"] },
+        });
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects invalid JSON in PROJECT_ACCESS", () => {
+      expect(() => loadConfig({ ...required, PROJECT_ACCESS: "not valid json {" })).toThrow(
+        "PROJECT_ACCESS must be valid JSON",
+      );
+      expect(() => loadStorageConfig({ PROJECT_ACCESS: "not valid json {" })).toThrow(
+        "PROJECT_ACCESS must be valid JSON",
+      );
+    });
+
+    it("rejects invalid project name in PROJECT_ACCESS", () => {
+      const badKey = JSON.stringify({ INVALID_NAME: { readGroups: ["hr"] } });
+      expect(() => loadConfig({ ...required, PROJECT_ACCESS: badKey })).toThrow(
+        'invalid project name "INVALID_NAME": must match /^[a-z0-9][a-z0-9-]{0,62}$/',
+      );
+      const traversal = JSON.stringify({ "../traversal": { readGroups: ["hr"] } });
+      expect(() => loadConfig({ ...required, PROJECT_ACCESS: traversal })).toThrow(
+        'invalid project name "../traversal": must match /^[a-z0-9][a-z0-9-]{0,62}$/',
+      );
+      expect(() => loadStorageConfig({ PROJECT_ACCESS: badKey })).toThrow(
+        'invalid project name "INVALID_NAME": must match /^[a-z0-9][a-z0-9-]{0,62}$/',
+      );
+    });
+
+    it("rejects when both PROJECT_ACCESS and PROJECT_ACCESS_FILE are set", () => {
+      expect(() =>
+        loadConfig({
+          ...required,
+          PROJECT_ACCESS: "{}",
+          PROJECT_ACCESS_FILE: "/tmp/some-file.json",
+        }),
+      ).toThrow("PROJECT_ACCESS and PROJECT_ACCESS_FILE cannot both be set");
+    });
+
+    it("rejects unreadable PROJECT_ACCESS_FILE", () => {
+      expect(() =>
+        loadConfig({
+          ...required,
+          PROJECT_ACCESS_FILE: "/nonexistent/path/access.json",
+        }),
+      ).toThrow("could not read PROJECT_ACCESS_FILE");
     });
   });
 });
