@@ -192,7 +192,7 @@ Consult this layout when choosing or creating projects:
 
 3. Non-code sources rules:
    - For web and document sources: `resource` = URL (Google Doc, Notion page, Zendesk macro, Slack permalink, etc.), plus `title`, `author` (the owning team or role, e.g. `Finance Team`), `last_modified` (from document metadata or the date the user gives; ISO 8601 with explicit offset, e.g. `2026-09-30T14:00:00Z`), and omit `commit`. All three are required for a URL source: if the date is unknown, ask the user; if nobody knows, do not cite that URL yet (seed the concept only from other dated sources, or defer it) and list it as pending in the report. Never substitute the time you read or received the document.
-   - URL sanitization: server lint warns (`invalid_resource`) when `resource` contains whitespace or any of `` ` $ ; | & < > ( ) \ ' " ``. Drop query parameters containing `&` (e.g. Slack `&cid=`) or percent-encode `&` as `%26`.
+   - URLs: record the URL exactly as shared; never rewrite, re-encode, or strip parameters, which can change what it points to. Server lint warns (`invalid_resource`) when `resource` contains whitespace or any of `` ` $ ; | & < > ( ) \ ' " ``; a canonical URL containing `&` (e.g. a Slack thread permalink) keeps that warning.
    - Pasted text with no URL: use a stable URI like `urn:ok-fine:pasted:<slug>` with `title` and `author`, plus `last_modified` only when the text or the user states its date.
    - Timezone offsets: `last_modified` (when present) and `stale_after` must include an explicit offset (e.g. `Z` or `+00:00`).
    - Source citations: all factual claims must cite sources with footnotes `[^id]` matching a source `id`. Lint warns if a footnote matches no source id.
@@ -210,7 +210,7 @@ Consult this layout when choosing or creating projects:
    - Call `read_concept` with `project: <project>` and `id: "overview"`, then `write_concept` with all frontmatter preserved, the body extended with bundle-absolute links to each seeded concept (e.g. `[Refund window](/policies/refund-window.md)`), and `expectedRevision`.
 6. Lint:
    - Call `lint_project` with `project: <project>`.
-   - Fix all reported errors and warnings in created concepts by updating them with `write_concept` and their latest `expectedRevision`.
+   - Fix all reported errors and warnings in created concepts by updating them with `write_concept` and their latest `expectedRevision`, except `invalid_resource` on a canonical URL, which stays as recorded.
 
 #### Step 6: Owner walk-through and report
 1. Ask the user once for their email address (there is no git config outside a repository), then walk through each seeded concept with the owner conversationally:

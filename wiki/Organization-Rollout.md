@@ -153,7 +153,7 @@ rather than git-tracked source code.
 - **Freshness without code sources:** A concept with no code sources is considered fresh when `stale_after` is set
   and is not in the past. Timestamps for `stale_after` and `last_modified` must use ISO 8601 with an explicit offset (e.g. `2026-09-30T14:00:00Z`); lint warns if the offset is omitted.
 - **Non-code sources:** Non-code sources carry `title`, `author`, `last_modified`, and no `commit`. The `resource` property is a URL (such as a Google Doc, Notion page, Zendesk macro, or Slack permalink) or a stable URI.
-  - *Clean URIs:* Server lint warns (`invalid_resource`) when `resource` contains whitespace or any shell metacharacters (`` ` $ ; | & < > ( ) \ ' " ``). Drop query parameters containing `&` (such as Slack `&cid=`) or percent-encode `&` as `%26`.
+  - *Canonical URLs:* Server lint warns (`invalid_resource`) when `resource` contains whitespace or any shell metacharacters (`` ` $ ; | & < > ( ) \ ' " ``). The warning is accepted for canonical URLs containing `&` (such as Slack thread permalinks); agents record URLs exactly as shared and never rewrite or re-encode them.
   - *Pasted text:* When documents are pasted without an existing URL, use a stable URI such as `urn:ok-fine:pasted:<slug>` with `title` and `author`.
   - *Dates:* URL sources require `last_modified`, taken from the document or its owner, never the time it was read; a URL whose date nobody knows is not cited until it is known. Pasted text carries `last_modified` only when its date is stated.
   - *Footnote citations:* Footnote citations `[^id]` in concept text must correspond to a source `id`; lint warns if a footnote matches no source id.
