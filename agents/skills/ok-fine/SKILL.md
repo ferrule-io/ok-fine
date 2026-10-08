@@ -16,7 +16,9 @@ Resolve the project using this order:
    - Call `list_projects` with `repository` set to the remote URL. Read from every returned project. Write to the first returned project unless the user specifies another.
    - If no project matches, state once that the repository is not onboarded and offer the `ok-fine-onboard` skill. Never create projects unasked.
 3. Otherwise (no repository, no shell, or no remote):
-   - Call `list_projects` with no arguments, pick the project(s) whose title and description fit the question, and call `search_concepts` without `project` to search across all projects.
+   - Call `orient` with the user's question, task, or topic to rank relevant projects and concepts across the organization and retrieve working rules.
+   - If deeper exploration of a specific project is needed, call `read_concept` with `id: "overview"` or `get_index` on that project.
+   - Alternatively, call `list_projects` with `team` and/or `query` (or no arguments), and call `search_concepts` without `project` to search across all projects.
    - Never run git commands and never say "not onboarded" / offer onboarding on this path.
    - If several fit, read from all; ask before writing only when the write target is ambiguous.
 4. If ok-fine tools are missing or return an authentication error, state once that the `ok-fine` MCP server is not connected and continue without it.
@@ -26,7 +28,7 @@ Resolve the project using this order:
 2. When working in a resolved project: call `get_index` with `project` to inspect the root directory index.
 3. Search for relevant concepts:
    - In a git repository or single-project session: call `search_concepts` with `project` and `query` set to key terms from the task. Read relevant matching concepts with `read_concept`.
-   - In a no-repo session: call `search_concepts` without `project` with key terms, then read relevant hits with `read_concept` (passing each hit's `project`). Answer citing concept ids/titles. Read the `overview` or `get_index` of a chosen project only when deeper exploration helps.
+   - In a no-repo session: prefer `orient` with the user's question first to discover ranked projects and concepts. If additional concepts are needed, call `search_concepts` without `project` with key terms, then read relevant hits with `read_concept` (passing each hit's `project`). Answer citing concept ids/titles. Read the `overview` or `get_index` of a chosen project only when deeper exploration helps.
 4. Check freshness and drift on every concept read:
    - A concept is fresh when it has a `stale_after`, is not `stale` (not past `stale_after`), and has no drifted sources. A concept without `stale_after` counts as stale.
    - For non-code sources (or sessions without git): fresh means `stale_after` is set and not past; additionally, when a tool available in the session can fetch a source's `resource` URL and report its last-modified time, a source modified after the concept's `generated.at` counts as drifted. Non-code sources carry `resource` = URL (or other stable URI) and no `commit`.
@@ -94,7 +96,7 @@ Never record:
 - Secrets, credentials, tokens, or personal data (customer names, emails, phone numbers)
 - Code snippets longer than 5 lines
 
-Search before creating (`search_concepts` with `project` and `query`, or without `project` in no-repo sessions) to update existing concepts instead of duplicating. Use lowercase kebab-case for slugs. Templates are in `references/concepts.md`.
+Search before creating (`search_concepts` with `project` and `query`, or `orient` / `search_concepts` without `project` in no-repo sessions) to update existing concepts instead of duplicating. Use lowercase kebab-case for slugs. Templates are in `references/concepts.md`.
 
 ## 5. Writing rules
 1. Update existing concepts:

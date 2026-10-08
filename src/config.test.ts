@@ -25,6 +25,7 @@ describe("loadConfig", () => {
     expect(config.allowUnauthenticatedNetwork).toBe(false);
     expect(config.trustProxy).toBe("loopback,linklocal,uniquelocal");
     expect(config.gitSyncIntervalSeconds).toBe(60);
+    expect(config.hubProject).toBe("org");
   });
 
   it("defaults AUTH_MODE to oidc", () => {
@@ -244,6 +245,14 @@ describe("loadConfig", () => {
         groupsClaim: "roles",
         allowedClientIds: ["client-1", "client-2"],
       });
+    });
+  });
+
+  describe("hubProject", () => {
+    it("defaults to org and loads custom value", () => {
+      expect(loadConfig(required).hubProject).toBe("org");
+      expect(loadConfig({ ...required, HUB_PROJECT: "corp" }).hubProject).toBe("corp");
+      expect(loadConfig({ ...required, HUB_PROJECT: "   " }).hubProject).toBe("org");
     });
   });
 });

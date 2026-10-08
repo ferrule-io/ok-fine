@@ -35,6 +35,7 @@ export interface StorageConfig {
   logLevel: string;
   dataDir: string;
   gitBranch: string;
+  hubProject: string;
   gitRemoteUrl?: string;
   gitSyncIntervalSeconds: number;
   gitSshKeyPath?: string;
@@ -143,6 +144,10 @@ const storageEnvShape = {
     .default("/data")
     .refine((v) => v.startsWith("/"), "DATA_DIR must be an absolute path"),
   GIT_BRANCH: z.string().default("main"),
+  HUB_PROJECT: z
+    .string()
+    .default("org")
+    .transform((v) => (v.trim() === "" ? "org" : v.trim())),
   GIT_REMOTE_URL: z.string().optional(),
   GIT_SYNC_INTERVAL_SECONDS: intEnv("GIT_SYNC_INTERVAL_SECONDS", "60", 0),
   GIT_SSH_KEY_PATH: z.string().optional(),
@@ -323,6 +328,7 @@ function storageFromRaw(
     logLevel: raw.LOG_LEVEL,
     dataDir: raw.DATA_DIR,
     gitBranch: raw.GIT_BRANCH,
+    hubProject: raw.HUB_PROJECT,
     gitRemoteUrl: raw.GIT_REMOTE_URL,
     gitSyncIntervalSeconds: raw.GIT_SYNC_INTERVAL_SECONDS,
     gitSshKeyPath: raw.GIT_SSH_KEY_PATH,

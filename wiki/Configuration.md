@@ -25,6 +25,7 @@ message naming every bad variable.
 | `LOG_LEVEL` | `info` | `fatal`, `error`, `warn`, `info`, `debug`, `trace`, `silent` |
 | `DATA_DIR` | `/data` (container), `~/.ok-fine` (CLI) | Absolute path for the repo and working files |
 | `GIT_BRANCH` | `main` | |
+| `HUB_PROJECT` | `org` | Hub project name; always included in `orient` results when it exists |
 | `GIT_REMOTE_URL` | unset | Remote repository URL (`https://…`, `ssh://…`, scp-like `user@host:path`, `file://…`, or an absolute local path `/…`); unset keeps history on disk only. Other schemes (e.g. `http://`, `git://`, `ext::`) and relative paths are rejected |
 | `GIT_SYNC_INTERVAL_SECONDS` | `60` | Periodic sync; `0` disables |
 | `GIT_SSH_KEY_PATH` | unset | Private key file; requires `GIT_SSH_KNOWN_HOSTS_PATH` to also be set |
@@ -34,6 +35,6 @@ message naming every bad variable.
 | `MAX_ARCHIVE_BYTES` | `52428800` | Max compressed archive upload |
 | `DEFAULT_STALE_AFTER_DAYS` | unset | Opt-in; stamps `stale_after` = now + N days on `write_concept` when omitted; producer value wins |
 
-Over stdio (`ok-fine` with no command), only `LOG_LEVEL`, `DATA_DIR`, `GIT_*`, `MAX_*`, and
-`DEFAULT_STALE_AFTER_DAYS` apply. The CLI (stdio and `ok-fine serve`) runs git with your environment and
+Over stdio (`ok-fine` with no command), only `LOG_LEVEL`, `DATA_DIR`, `GIT_*`, `MAX_*`,
+`DEFAULT_STALE_AFTER_DAYS`, and `HUB_PROJECT` apply. The CLI (stdio and `ok-fine serve`) runs git with your environment and
 credentials; the container isolates git under `DATA_DIR/home`.

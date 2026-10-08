@@ -13,8 +13,9 @@ When an assistant or agent resolves which ok-fine project to use, project resolu
    `repository` set to the remote URL (derived from `git remote get-url origin`, falling back to the first remote).
    If no project matches, report that the repository is not onboarded and offer the `ok-fine-onboard` skill.
 3. **General fallback (desktop and non-coding chat):** Otherwise (no repository, no shell, or no git remote), call
-   `list_projects` with no arguments, pick the project(s) whose title and description fit the question, and call
-   `search_concepts` without `project` to search across all projects. Never run git commands and never say "not
+   `orient` with the question to rank relevant projects and concepts across the organization and retrieve working rules.
+   If needed, inspect specific projects with `list_projects` (with `team` and/or `query`, or no arguments) or search
+   across all projects with `search_concepts` omitting `project`. Never run git commands and never say "not
    onboarded" or offer onboarding on this path. If several projects fit, read from all of them; ask the user before
    writing only when the write target is ambiguous.
 
