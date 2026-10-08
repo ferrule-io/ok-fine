@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BundleTree, buildDirListing, planIndexes } from "./bundle.js";
+import { BundleTree, buildDirListing, lintBundle, planIndexes } from "./bundle.js";
 
 const tree = new BundleTree([
   "overview.md",
@@ -39,5 +39,31 @@ describe("BundleTree", () => {
     expect(tree.exists("/a/x.md")).toBe(true);
     expect(tree.exists("../x")).toBe(false);
     expect(tree.exists("nope")).toBe(false);
+  });
+
+  it("lintBundle emits broken_cross_link warning when cross-project target is missing", async () => {
+    const source = {
+      paths: ["overview.md", "index.md", "guide.md"],
+      read: async (path: string) => {
+        if (path === "index.md") return Buffer.from("# Index\n\n## Section\n* [Guide](guide.md)\n");
+        if (path === "overview.md") return Buffer.from("---\ntype: Project\ntitle: Test\n---\nOverview\n");
+        if (path === "guide.md") {
+          return Buffer.from(
+            "---\ntype: Guide\ntitle: Guide\n---\n[Tier](okf://org/glossary/tier) and [Missing](okf://org/missing)\n",
+          );
+        }
+        return null;
+      },
+    };
+
+    const res = await lintBundle(source, new Date(), {
+      crossProjectConceptExists: (project, id) => project === "org" && id === "glossary/tier",
+    });
+
+    const warnings = res.issues.filter((i) => i.severity === "warning");
+    expect(warnings.some((w) => w.code === "broken_cross_link")).toBe(true);
+    const missingIssue = warnings.find((w) => w.code === "broken_cross_link");
+    expect(missingIssue?.message).toContain("okf://org/missing");
+    expect(missingIssue?.message).not.toContain("glossary/tier");
   });
 });

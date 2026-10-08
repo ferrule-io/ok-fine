@@ -203,6 +203,7 @@ export function Markdown({ project, concept, onHeadings, onCitations, className 
     if (!conceptId) {
       return;
     }
+    const targetProject = anchor.getAttribute("data-okf-project") ?? project;
 
     if (previewState?.targetEl === anchor) {
       return;
@@ -213,8 +214,8 @@ export function Markdown({ project, concept, onHeadings, onCitations, className 
       const rect = anchor.getBoundingClientRect();
       try {
         const data = await queryClient.fetchQuery({
-          queryKey: queryKeys.concept(project, conceptId),
-          queryFn: () => readConcept(project, conceptId),
+          queryKey: queryKeys.concept(targetProject, conceptId),
+          queryFn: () => readConcept(targetProject, conceptId),
         });
         setPreviewState({
           conceptId,

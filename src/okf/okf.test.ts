@@ -3,7 +3,7 @@ import { applyFrontmatter, isoAfterDays, parseFrontmatter, serializeConcept, spl
 import { type DirListing, renderIndex } from "./index-file.js";
 import { lintConceptFile, lintLogFile } from "./lint.js";
 import { prependLogEntry } from "./log-file.js";
-import { extractLinks } from "./markdown.js";
+import { extractCrossProjectLinks, extractLinks, parseCrossProjectTarget } from "./markdown.js";
 import { normalizeConceptIdForWrite, resolveReadPath } from "./paths.js";
 import { normalizeRepository } from "./repository.js";
 import { effectiveStatus, isStale, parseActor, trustTier } from "./semantics.js";
@@ -134,6 +134,93 @@ Also external [External](https://example.com) and hash [Anchor](#heading).
   it("extractLinks never treats footnote citations as concept links", () => {
     expect(extractLinks("x[^a]\n\n[^a]: other.md\n", "dir/c")).toEqual([]);
     expect(extractLinks("x[^a] and [B](b.md)\n\n[^a]: other.md\n", "dir/c")).toEqual(["dir/b"]);
+  });
+
+  it("parseCrossProjectTarget parses valid cross-project links and rejects traversal, invalid project names, and reserved names", () => {
+    // Valid links
+    expect(parseCrossProjectTarget("okf://org/glossary/tier")).toEqual({
+      project: "org",
+      id: "glossary/tier",
+    });
+    expect(parseCrossProjectTarget("okf://org/glossary/tier.md#x")).toEqual({
+      project: "org",
+      id: "glossary/tier",
+    });
+    expect(parseCrossProjectTarget("okf://org/glossary/tier?ref=1#x")).toEqual({
+      project: "org",
+      id: "glossary/tier",
+    });
+    expect(parseCrossProjectTarget("okf://org/tier")).toEqual({
+      project: "org",
+      id: "tier",
+    });
+    expect(parseCrossProjectTarget("okf://org/tier.md")).toEqual({
+      project: "org",
+      id: "tier",
+    });
+
+    // Rejects traversal
+    expect(parseCrossProjectTarget("okf://org/../tier")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org/tier/..")).toBeNull();
+    expect(parseCrossProjectTarget("okf://../tier")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org/a/../b")).toBeNull();
+
+    // Rejects invalid project names
+    expect(parseCrossProjectTarget("okf://Org/tier")).toBeNull();
+    expect(parseCrossProjectTarget("okf://-org/tier")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org_name/tier")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org/")).toBeNull();
+
+    // Rejects reserved names
+    expect(parseCrossProjectTarget("okf://org/index")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org/index.md")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org/log")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org/log.md")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org/sub/log")).toBeNull();
+
+    // Rejects empty segments, backslashes, malformed URIs
+    expect(parseCrossProjectTarget("okf://org//tier")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org/tier/")).toBeNull();
+    expect(parseCrossProjectTarget("okf://org\\tier")).toBeNull();
+    expect(parseCrossProjectTarget("https://org/tier")).toBeNull();
+  });
+
+  it("extractCrossProjectLinks extracts and deduplicates cross-project links, skipping intra-bundle links and footnote definitions", () => {
+    const body = `
+See [Tier](okf://org/glossary/tier) and duplicate [Tier Policy](okf://org/glossary/tier.md#frag).
+Also intra-bundle [Local](local.md) and reference [SLA][sla-ref].
+
+[^note]: okf://org/glossary/tier
+
+[sla-ref]: okf://org/policies/sla
+`;
+    const links = extractCrossProjectLinks(body);
+    expect(links).toEqual([
+      { project: "org", id: "glossary/tier" },
+      { project: "org", id: "policies/sla" },
+    ]);
+  });
+
+  it("lintConceptFile warns on broken cross-project links when checker provided", () => {
+    const text = `---
+type: Reference
+title: Guide
+---
+
+See [Tier](okf://org/glossary/tier) and [Missing](okf://org/missing/concept).
+`;
+    const issues = lintConceptFile("guide.md", text, {
+      now: new Date(),
+      conceptExists: () => true,
+      fileExists: () => true,
+      crossProjectConceptExists: (project, id) => project === "org" && id === "glossary/tier",
+    });
+
+    const warnings = issues.filter((i) => i.severity === "warning");
+    expect(warnings.some((w) => w.code === "broken_cross_link")).toBe(true);
+    const broken = warnings.find((w) => w.code === "broken_cross_link");
+    expect(broken?.message).toContain("okf://org/missing/concept");
   });
 
   it("renderIndex golden string for a root with two types, a file, and a subdirectory", () => {

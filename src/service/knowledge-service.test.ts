@@ -7,6 +7,7 @@ import * as tar from "tar";
 import { afterEach, describe, expect, it } from "vitest";
 import { type Config, type Logger, loadConfig } from "../config.js";
 import { OkfError } from "../errors.js";
+import { bundleSource } from "../store/backend.js";
 import { Catalog } from "../store/catalog.js";
 import { GitBackend } from "../store/git-backend.js";
 import { KnowledgeService } from "./knowledge-service.js";
@@ -49,6 +50,7 @@ describe("KnowledgeService", () => {
   async function setupService(extraEnv: Record<string, string> = {}): Promise<{
     service: KnowledgeService;
     storage: GitBackend;
+    catalog: Catalog;
     dataDir: string;
     config: Config;
   }> {
@@ -64,7 +66,7 @@ describe("KnowledgeService", () => {
     const catalog = new Catalog();
     const service = new KnowledgeService({ config, storage, catalog, log: mockLogger });
     await service.initialize();
-    return { service, storage, dataDir, config };
+    return { service, storage, catalog, dataDir, config };
   }
 
   it("per-concept lint reports a missing computation file until the file is written", async () => {
@@ -673,6 +675,122 @@ describe("KnowledgeService", () => {
       actor: "agent/1.0",
     });
     expect((await service.readConcept("demo", "tables/b")).links.inbound).toEqual(["a"]);
+  });
+
+  it("cross-project links: outbound includes cross-project target, target inbound includes okf://source, missing target warns, and updates prune", async () => {
+    const { service, storage, catalog } = await setupService();
+    await service.createProject(alice, {
+      project: "org",
+      title: "Organization Hub",
+      actor: "human:alice",
+    });
+
+    await service.createProject(alice, {
+      project: "support",
+      title: "Customer Support",
+      actor: "human:alice",
+    });
+
+    // Create target in org
+    await service.writeConcept(alice, {
+      project: "org",
+      id: "glossary/tier",
+      frontmatter: { type: "Glossary", title: "Support Tiers" },
+      body: "Tier definitions.",
+      actor: "agent/1.0",
+    });
+
+    // Create source in support linking to okf://org/glossary/tier
+    const guideWrite = await service.writeConcept(alice, {
+      project: "support",
+      id: "guide",
+      frontmatter: { type: "Playbook", title: "Support Guide" },
+      body: "See [Tiers](okf://org/glossary/tier) for customer levels.",
+      actor: "agent/1.0",
+    });
+    // Write should succeed with no broken_cross_link warning
+    expect(guideWrite.issues.some((i) => i.code === "broken_cross_link")).toBe(false);
+
+    // Read source in support: outbound shows cross-project link
+    const guideView = await service.readConcept("support", "guide");
+    expect(guideView.links.outbound).toContainEqual({
+      project: "org",
+      id: "glossary/tier",
+      exists: true,
+    });
+
+    // Read target in org: inbound shows cross-project link okf://support/guide
+    const tierView = await service.readConcept("org", "glossary/tier");
+    expect(tierView.links.inbound).toEqual(["okf://support/guide"]);
+
+    // Rebuilding / resyncing org preserves cross-project inbound links from support
+    const orgTree = await storage.tree("org");
+    await catalog.rebuildProject("org", bundleSource(storage, "org", orgTree));
+    const tierAfterRebuild = await service.readConcept("org", "glossary/tier");
+    expect(tierAfterRebuild.links.inbound).toEqual(["okf://support/guide"]);
+    // Missing target gives a lint warning and write still succeeds
+    const missingWrite = await service.writeConcept(alice, {
+      project: "support",
+      id: "escalations",
+      frontmatter: { type: "Playbook", title: "Escalations" },
+      body: "See [Missing Policy](okf://org/missing/policy).",
+      actor: "agent/1.0",
+    });
+    expect(missingWrite.issues.some((i) => i.code === "broken_cross_link" && i.severity === "warning")).toBe(true);
+
+    const escalationsView = await service.readConcept("support", "escalations");
+    expect(escalationsView.links.outbound).toContainEqual({
+      project: "org",
+      id: "missing/policy",
+      exists: false,
+    });
+    expect(escalationsView.issues.some((i) => i.code === "broken_cross_link" && i.severity === "warning")).toBe(true);
+
+    // Updating source to remove link updates target inbound
+    await service.writeConcept(alice, {
+      project: "support",
+      id: "guide",
+      frontmatter: { type: "Playbook", title: "Support Guide" },
+      body: "No links here anymore.",
+      actor: "agent/1.0",
+    });
+    const tierAfterUpdate = await service.readConcept("org", "glossary/tier");
+    expect(tierAfterUpdate.links.inbound).toEqual([]);
+
+    // Restore link
+    await service.writeConcept(alice, {
+      project: "support",
+      id: "guide",
+      frontmatter: { type: "Playbook", title: "Support Guide" },
+      body: "See [Tiers](okf://org/glossary/tier) again.",
+      actor: "agent/1.0",
+    });
+    expect((await service.readConcept("org", "glossary/tier")).links.inbound).toEqual(["okf://support/guide"]);
+
+    // Deleting source concept cleans up target inbound links
+    await service.deleteConcept(alice, {
+      project: "support",
+      id: "guide",
+      actor: "agent/1.0",
+    });
+    expect((await service.readConcept("org", "glossary/tier")).links.inbound).toEqual([]);
+
+    // Recreate source link and test deleteProject
+    await service.writeConcept(alice, {
+      project: "support",
+      id: "guide",
+      frontmatter: { type: "Playbook", title: "Support Guide" },
+      body: "See [Tiers](okf://org/glossary/tier).",
+      actor: "agent/1.0",
+    });
+    expect((await service.readConcept("org", "glossary/tier")).links.inbound).toEqual(["okf://support/guide"]);
+
+    // Deleting source project support cleans up inbound links on org
+    await service.deleteProject(alice, {
+      project: "support",
+      actor: "human:alice",
+    });
+    expect((await service.readConcept("org", "glossary/tier")).links.inbound).toEqual([]);
   });
 
   it("remote sync with bare repo: write propagation, external clone push, conflict branch preservation", async () => {

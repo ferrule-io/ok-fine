@@ -1,5 +1,5 @@
 import { parseFrontmatter, splitFrontmatter } from "./frontmatter.js";
-import { extractLinks } from "./markdown.js";
+import { type CrossProjectLink, extractCrossProjectLinks, extractLinks } from "./markdown.js";
 import { blobRevision } from "./paths.js";
 import {
   displayTitle,
@@ -32,6 +32,7 @@ export interface ConceptRecord {
   generatedBy: string | null;
   lastVerifiedAt: string | null;
   outbound: string[];
+  crossProjectOutbound: CrossProjectLink[];
 }
 
 export function parseConcept(project: string, id: string, file: string, buf: Buffer): ConceptRecord {
@@ -59,6 +60,7 @@ export function parseConcept(project: string, id: string, file: string, buf: Buf
       generatedBy: null,
       lastVerifiedAt: null,
       outbound: [],
+      crossProjectOutbound: [],
     };
   }
 
@@ -83,6 +85,7 @@ export function parseConcept(project: string, id: string, file: string, buf: Buf
       generatedBy: null,
       lastVerifiedAt: null,
       outbound: [],
+      crossProjectOutbound: [],
     };
   }
 
@@ -107,6 +110,7 @@ export function parseConcept(project: string, id: string, file: string, buf: Buf
       generatedBy: generatedBy(data),
       lastVerifiedAt: lastVerifiedAt(data),
       outbound: extractLinks(split.body, id),
+      crossProjectOutbound: extractCrossProjectLinks(split.body),
     };
   }
 
@@ -131,5 +135,6 @@ export function parseConcept(project: string, id: string, file: string, buf: Buf
     generatedBy: generatedBy(data),
     lastVerifiedAt: lastVerifiedAt(data),
     outbound: extractLinks(split.body, id),
+    crossProjectOutbound: extractCrossProjectLinks(split.body),
   };
 }

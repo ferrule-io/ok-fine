@@ -1,6 +1,12 @@
 import { posix } from "node:path";
 import { parseFrontmatter, splitFrontmatter } from "./frontmatter.js";
-import { computationBlocks, extractFootnoteLabels, extractLinks, hasLegacyCitations } from "./markdown.js";
+import {
+  computationBlocks,
+  extractCrossProjectLinks,
+  extractFootnoteLabels,
+  extractLinks,
+  hasLegacyCitations,
+} from "./markdown.js";
 import { ISO_DATETIME, isStale, parseActor } from "./semantics.js";
 
 const COMMIT_RE = /^[0-9a-f]{7,64}$/i;
@@ -20,6 +26,7 @@ export function lintConceptFile(
     now: Date;
     conceptExists(id: string): boolean;
     fileExists(bundlePath: string): boolean;
+    crossProjectConceptExists?(project: string, id: string): boolean;
   },
 ): LintIssue[] {
   const issues: LintIssue[] = [];
@@ -410,6 +417,21 @@ export function lintConceptFile(
         path,
         message: `link to concept "${target}" does not exist`,
       });
+    }
+  }
+
+  // Warning: cross-project outbound links
+  if (ctx.crossProjectConceptExists) {
+    const crossLinks = extractCrossProjectLinks(body);
+    for (const target of crossLinks) {
+      if (!ctx.crossProjectConceptExists(target.project, target.id)) {
+        issues.push({
+          severity: "warning",
+          code: "broken_cross_link",
+          path,
+          message: `cross-project link to "okf://${target.project}/${target.id}" does not exist`,
+        });
+      }
     }
   }
 
