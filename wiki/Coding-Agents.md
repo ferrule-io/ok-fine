@@ -3,6 +3,9 @@ without changing a single file in them. There is no `AGENTS.md`, `CLAUDE.md`, `G
 settings file to commit: knowledge and the repository-to-project binding both live in ok-fine. Each developer
 installs one agent package and configures the ok-fine MCP server once per harness.
 
+For non-coding chat users, desktop harnesses, or organization-wide rollout without git, see
+[Organization rollout](https://github.com/ferrule-io/ok-fine/wiki/Organization-Rollout).
+
 The agent package is built from [`agents/`](https://github.com/ferrule-io/ok-fine/tree/main/agents) and published to
 [`ferrule-io/ok-fine-agents`](https://github.com/ferrule-io/ok-fine-agents) whenever a release changes it. It contains:
 

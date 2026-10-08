@@ -1,12 +1,12 @@
 # Concept Templates
 
-Templates and structural conventions for ok-fine knowledge concepts.
+Templates and structural conventions for ok-fine knowledge concepts. Sources in code repositories include the repository-relative path and commit hash. For non-code sources (policies, processes, web URLs, documents), `resource` is a URL or stable URI and `commit` is omitted.
 
 ## Decision
 
 Use for architectural, technical, and process decisions with enduring impact.
 
-### Frontmatter Example
+### Frontmatter Example (Code Source)
 ```yaml
 type: Decision
 title: Use PostgreSQL for Persistent Relational Storage
@@ -18,6 +18,19 @@ sources:
   - id: adr-004
     resource: github.com/acme/shop/docs/adr/004-storage.md
     commit: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+```
+
+### Frontmatter Example (Non-code Source)
+```yaml
+type: Decision
+title: Customer Refund Window and Eligibility
+description: Policy granting full refunds within thirty days of purchase for unredeemed services.
+status: stable
+tags: [policy, finance, refunds]
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
+sources:
+  - id: refund-policy
+    resource: https://handbook.example.com/finance/refunds
 ```
 
 ### Body Headings
@@ -71,6 +84,9 @@ sources:
   - id: logging-config
     resource: github.com/acme/shop/src/logger.ts
     commit: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+  # For non-code sources, omit commit:
+  # - id: branching-policy
+  #   resource: https://handbook.example.com/engineering/branching
 ```
 
 ### Body Headings
@@ -235,6 +251,9 @@ sources:
   - id: api-conventions
     resource: github.com/acme/shop/docs/api-conventions.md
     commit: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+  # For non-code sources, omit commit:
+  # - id: term-definition
+  #   resource: https://handbook.example.com/terms/billing
 ```
 
 ### Body Headings
@@ -279,4 +298,42 @@ Adopt PostgreSQL 16 as the primary relational datastore managed through migratio
 - DynamoDB: rejected because multi-table ACID transactions and flexible reporting queries introduced unnecessary complexity.
 
 [^adr-004]: Recorded in Architecture Decision Record 004, `docs/adr/004-storage.md`.
+```
+
+---
+
+## Complete Non-Code Decision Example
+
+```yaml
+---
+type: Decision
+title: Customer Refund Window and Eligibility
+description: Policy granting full refunds within thirty days of purchase for unredeemed services.
+status: stable
+tags:
+  - policy
+  - finance
+  - refunds
+stale_after: "<ISO 8601 timestamp 180 days from now, e.g. 2027-04-03T00:00:00Z>"
+sources:
+  - id: refund-policy
+    resource: https://handbook.example.com/finance/refunds
+---
+
+## Context
+Customer support previously resolved refund requests ad hoc without a documented timeline, leading to inconsistent customer outcomes and delayed finance reconciliation[^refund-policy].
+
+## Decision
+All direct customers may request a full refund within 30 days of purchase for unused subscriptions or unredeemed service credits.
+
+## Consequences
+- Support agents can process eligible refunds immediately without manager approval.
+- Reduces payment disputes and chargebacks.
+- Finance reconciles processed refund ledger events monthly.
+
+## Alternatives considered
+- 14-day refund window: rejected as too short for customer evaluation.
+- No cash refunds / store credit only: rejected due to negative impact on trial conversion.
+
+[^refund-policy]: Documented in Customer Operations Policy, `https://handbook.example.com/finance/refunds`.
 ```

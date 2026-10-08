@@ -6,6 +6,7 @@
 - [How it works](https://github.com/ferrule-io/ok-fine/wiki/How-It-Works)
 - [Connecting an MCP client](https://github.com/ferrule-io/ok-fine/wiki/Connecting-an-MCP-Client)
 - [Using ok-fine from coding agents](https://github.com/ferrule-io/ok-fine/wiki/Coding-Agents)
+- [Organization rollout](https://github.com/ferrule-io/ok-fine/wiki/Organization-Rollout)
 - [MCP tools](https://github.com/ferrule-io/ok-fine/wiki/MCP-Tools)
 - [REST API](https://github.com/ferrule-io/ok-fine/wiki/REST-API)
 - [Authentication and authorization](https://github.com/ferrule-io/ok-fine/wiki/Authentication-and-Authorization)
