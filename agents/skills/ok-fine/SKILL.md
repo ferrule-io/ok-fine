@@ -57,6 +57,7 @@ Resolve the project using this order:
 ## 4. Record after working
 Before completing a non-trivial task, record durable knowledge discovered or decided during work.
 
+### Code repositories
 | Knowledge | `type` | Id prefix |
 | --- | --- | --- |
 | Decision with rationale and rejected alternatives | Decision | `decisions/<slug>` |
@@ -68,12 +69,29 @@ Before completing a non-trivial task, record durable knowledge discovered or dec
 | Gotcha, incident, or external quirk | Reference | `notes/<slug>` |
 | Domain term | Glossary Term | `glossary/<term>` |
 
+### Business knowledge (team projects)
+| Type | Id prefix | `stale_after` |
+| --- | --- | --- |
+| Playbook | `playbooks/` | 90–180d |
+| Policy | `policies/` | 180–365d |
+| Process | `processes/` | 180d |
+| Escalation | `escalations/` | 90–180d |
+| FAQ | `faqs/` | 90–180d |
+| Campaign | `campaigns/` | 30–90d |
+| Persona / Product | `personas/`, `products/` | 90–180d |
+| Template | `templates/` | 180d |
+| Glossary Term / Decision | `glossary/`, `decisions/` | 365d / 180d |
+
+Business Playbooks use `playbooks/<slug>`, while engineering runbooks keep `runbooks/<slug>`.
+
 Agents finishing work on an unmerged branch record it as a proposal: a new concept at the id its type gets from the table (usually `decisions/<slug>`), `status: draft`, with the `proposal: { ref: ... }` key (e.g. `proposal: { ref: https://github.com/acme/shop/pull/42 }`; template in `references/concepts.md`). Never write a proposal over an existing concept's id and never edit current-state concepts for unmerged work; link them under `## Would change`.
+
+Recording loop: when a support conversation resolves a new kind of case, or a campaign closes, propose (ask the user before writing) a draft FAQ, Escalation, or Playbook (or a Campaign retrospective update), `status: draft`, after `search_concepts` to update instead of duplicate.
 
 Never record:
 - Anything obvious from a minute of reading code
 - Task progress or transient work notes
-- Secrets, credentials, tokens, or personal data
+- Secrets, credentials, tokens, or personal data (customer names, emails, phone numbers)
 - Code snippets longer than 5 lines
 
 Search before creating (`search_concepts` with `project` and `query`, or without `project` in no-repo sessions) to update existing concepts instead of duplicating. Use lowercase kebab-case for slugs. Templates are in `references/concepts.md`.
@@ -89,10 +107,10 @@ Search before creating (`search_concepts` with `project` and `query`, or without
 3. Frontmatter fields:
    - Set `type`, `title`, one-sentence `description`, `tags`, and `status`.
    - Use `status: draft` when knowledge is inferred rather than explicitly stated by a source.
-   - Set `stale_after` on every concept you write (create or update) to now + 180 days (ISO 8601 timestamp with explicit offset, e.g. `2027-04-03T00:00:00Z`). Volatile facts (versions, owners, endpoints, deploy targets) may use a shorter horizon (e.g. 90 days).
+   - Set `stale_after` on every concept you write (create or update): for business concepts, use the horizon from the business table (e.g. 30–90d for campaigns, 90–180d for FAQs/escalations/playbooks/personas/products, 180d for processes/templates/decisions, 180–365d for policies, 365d for glossary terms); for code concepts, default to now + 180 days (ISO 8601 timestamp with explicit offset, e.g. `2027-04-03T00:00:00Z`). Volatile facts (versions, owners, endpoints, deploy targets) may use a shorter horizon (e.g. 90 days).
 4. Sources:
    - Provide a `sources` array where each entry has a short slug `id`.
-   - Non-code sources: `resource` = URL (or other stable URI), no `commit`. In no-repo sessions, cite the URLs or documents the user or tools provided.
+   - Non-code sources: `resource` = URL (or other stable URI) plus `title`, `author` (owning team or role), and `last_modified` (ISO 8601 with explicit offset, e.g. `2026-09-30T14:00:00Z`), with no `commit`. URL sources require all three; take `last_modified` from the document or its owner, never the time you read it, and do not cite a URL whose date nobody knows. Record URLs exactly as shared; never rewrite, re-encode, or strip parameters. Lint warns (`invalid_resource`) on whitespace or `` ` $ ; | & < > ( ) \ ' " `` in `resource`; accept that warning for canonical URLs containing `&` (e.g. Slack thread permalinks). For pasted text with no URL, use a stable URI like `urn:ok-fine:pasted:<slug>` with `title`, `author`, and `last_modified` when its date is stated. In no-repo sessions, cite the URLs or documents the user or tools provided. Never record personal data (customer or employee names, emails, phone numbers); `owners` and `author` hold team or role names only.
    - In a git repository, code evidence: see §6.4.
 5. Citations and links:
    - Cite claims using footnotes `[^<id>]` matching the source `id`.
@@ -103,7 +121,7 @@ Search before creating (`search_concepts` with `project` and `query`, or without
    - If model is unavailable, pass `<harness>/unknown`. Never use `human:<id>` for agent writes.
    - Use `human:<email>` only when the user personally reviewed the concept: get the email from `git config user.email` in a repository, otherwise use the email the user confirms.
 7. Verification:
-   - For non-code concepts: after re-checking against the source, update `stale_after` (to now + 180 days) via `write_concept`, then call `verify_concept` with `actor: <harness>/<model>` and the returned `revision`.
+   - For non-code concepts: after re-checking against the source, update `stale_after` (per the type's horizon) via `write_concept`, then call `verify_concept` with `actor: <harness>/<model>` and the returned `revision`.
    - In a git repository, verification must also refresh `sources[].commit` per §6.5 so the drift check stops firing.
 8. Message:
    - Pass a concise one-line `message` describing the edit.
