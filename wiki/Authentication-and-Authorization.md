@@ -57,7 +57,7 @@ In addition to scope verification, access can be restricted by configuring an ac
 - `OAUTH_ALLOWED_SUBJECTS`: allowed JWT `sub` values (`oidc` mode only).
 - `OAUTH_ALLOWED_EMAILS`: allowed user email addresses (compared case-insensitively; requires `email_verified=true`; `oidc` mode only).
 - `OAUTH_REQUIRED_GROUPS`: required user groups (`oidc` mode only).
-- `OAUTH_GROUPS_CLAIM`: the claim containing user groups (default: `groups`; supports a string or an array of strings; `oidc` mode only).
+- `OAUTH_GROUPS_CLAIM`: the claim containing user groups (default: `groups`; supports a string or an array of strings; `oidc` mode only). The groups it holds are carried on every request's principal, whether or not `OAUTH_REQUIRED_GROUPS` is set; `AUTH_MODE=none` and stdio sessions have no groups.
 - `OAUTH_ALLOWED_CLIENT_IDS`: allowed client IDs matched against `azp`, `client_id`, or `cid` (`oidc` mode only).
 
 A token passes the access policy when:

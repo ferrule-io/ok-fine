@@ -23,6 +23,7 @@ const alice: Principal = {
   subject: "u1",
   clientId: "c1",
   identity: "alice",
+  groups: [],
   scopes: ["okf:read", "okf:write", "okf:admin"],
   canRead: true,
   canWrite: true,

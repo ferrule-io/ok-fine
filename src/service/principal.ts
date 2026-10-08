@@ -6,6 +6,8 @@ export interface Principal {
   clientId: string;
   identity: string | null;
   scopes: string[];
+  /** IdP groups from the configured groups claim; empty for AUTH_MODE=none and stdio. */
+  groups: string[];
   canRead: boolean;
   canWrite: boolean;
   canAdmin: boolean;
