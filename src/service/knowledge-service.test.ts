@@ -1272,6 +1272,16 @@ title: Remote X
       expect(hubProject?.reasons).toContain("hub project");
       expect(hubProject?.concepts).toEqual([]);
 
+      // A project filter keeps the requested project first and still lists the hub, even with limit 1
+      const filtered = await service.orient(alice, {
+        question: "quantum entanglement lasers",
+        project: "unrelated",
+        limit: 1,
+      });
+      expect(filtered.projects.map((p) => p.project)).toEqual(["unrelated", "org"]);
+      const hubOnly = await service.orient(alice, { question: "policies", project: "org" });
+      expect(hubOnly.projects.map((p) => p.project)).toEqual(["org"]);
+
       // Custom hub project name via HUB_PROJECT config
       const { service: customService } = await setupService({ HUB_PROJECT: "corp" });
       await customService.createProject(alice, { project: "corp", title: "Corp Hub", actor: "test/1.0" });

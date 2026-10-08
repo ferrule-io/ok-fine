@@ -3,7 +3,7 @@ A client only sees the tools its token's scopes allow. Over stdio, every tool is
 | Tool | Scope | Purpose |
 |---|---|---|
 | `list_projects` | read | Projects with counts, bound git repositories, and routing metadata (`teams`, `domains`, `audience`, `keywords`, `owners`); call first to pick a project (pass `repository` in a git repo; or `team` and/or `query`, or no arguments) |
-| `orient` | read | Call before answering any question about how the organization works: processes, policies, customers, products, campaigns (`question` max 512 chars, `limit` max 50); returns ranked projects, concepts, and working rules |
+| `orient` | read | Call before answering any question about how the organization works: processes, policies, customers, products, campaigns (`question` max 512 chars, `limit` max 50); returns ranked projects, concepts, and working rules. The hub project (`HUB_PROJECT`) is always listed when it exists, also when `project` narrows the search |
 | `get_index` | read | Directory listing: concepts by type, files, subdirectories |
 | `read_concept` | read | Frontmatter, body, derived trust/staleness, links, lint issues (including `unresolved_conflict`), `revision` |
 | `search_concepts` | read | Keyword search (`query` max 512 chars) with filters; omitting `project` searches every project and returns `project` for `read_concept` |

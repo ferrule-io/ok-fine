@@ -697,7 +697,13 @@ export class KnowledgeService {
     const meaningfulTerms = questionTerms.filter((q) => q.length >= 3);
 
     const allProjects = this.catalog.projects();
-    const candidateProjects = args.project ? [args.project] : allProjects;
+    const hubExists = allProjects.includes(hubProjectName);
+    // A project filter narrows the search, but the hub project is still listed (after the requested one).
+    const candidateProjects = args.project
+      ? args.project !== hubProjectName && hubExists
+        ? [args.project, hubProjectName]
+        : [args.project]
+      : allProjects;
 
     const searchHits = this.catalog.search({
       query: question,
@@ -828,10 +834,14 @@ export class KnowledgeService {
       return a.project.localeCompare(b.project, "en");
     });
 
-    let finalProjects = ranked.slice(0, projectLimit);
-    if (!args.project && allProjects.includes(hubProjectName)) {
-      const hubInFinal = finalProjects.some((p) => p.isHub);
-      if (!hubInFinal) {
+    let finalProjects: typeof ranked;
+    if (args.project) {
+      const requested = ranked.filter((p) => p.project === args.project);
+      const hub = ranked.filter((p) => p.isHub && p.project !== args.project);
+      finalProjects = [...requested, ...hub];
+    } else {
+      finalProjects = ranked.slice(0, projectLimit);
+      if (hubExists && !finalProjects.some((p) => p.isHub)) {
         const hubEntry = ranked.find((p) => p.isHub);
         if (hubEntry) {
           if (finalProjects.length >= projectLimit) {
