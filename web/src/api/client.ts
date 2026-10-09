@@ -1,4 +1,5 @@
 import type { UiClientConfig } from "../../../src/http/ui.js";
+import type { MetricsReport, MetricsWindow } from "../../../src/metrics/types.js";
 import type { LintIssue } from "../../../src/okf/lint.js";
 import type { Status, TrustTier } from "../../../src/okf/semantics.js";
 import type {
@@ -211,6 +212,11 @@ export async function search(params: SearchParams): Promise<SearchHit[]> {
 export async function syncStatus(): Promise<SyncStatus> {
   const res = await apiFetch("/api/v1/sync");
   return (await res.json()) as SyncStatus;
+}
+
+export async function getMetrics(window: MetricsWindow): Promise<MetricsReport> {
+  const res = await apiFetch(`/api/v1/metrics?window=${window}`);
+  return (await res.json()) as MetricsReport;
 }
 
 export async function downloadArchive(p: string): Promise<void> {

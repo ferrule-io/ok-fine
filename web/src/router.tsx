@@ -6,6 +6,7 @@ import { CallbackPage } from "./pages/CallbackPage.js";
 import { ConceptPage } from "./pages/ConceptPage.js";
 import { FilePage } from "./pages/FilePage.js";
 import { HealthPage } from "./pages/HealthPage.js";
+import { MetricsPage } from "./pages/MetricsPage.js";
 import { NotFoundPage } from "./pages/NotFoundPage.js";
 import { ProjectPage } from "./pages/ProjectPage.js";
 import { ProjectsPage } from "./pages/ProjectsPage.js";
@@ -30,6 +31,10 @@ export const router = createBrowserRouter(
             {
               path: "search",
               element: <SearchPage />,
+            },
+            {
+              path: "metrics",
+              element: <MetricsPage />,
             },
             {
               path: "p/:project",

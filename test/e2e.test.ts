@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadConfig, loadStorageConfig } from "../src/config.js";
 import { type DevIssuer, startDevIssuer } from "../src/dev/issuer.js";
 import type { UiClientConfig } from "../src/http/ui.js";
+import type { MetricsReport } from "../src/metrics/types.js";
 import { type RunningServer, startLocalHost, startServer } from "../src/server.js";
 import { type RunningStdioProxy, startStdioProxy } from "../src/stdio-proxy.js";
 import { VERSION } from "../src/version.js";
@@ -256,6 +257,13 @@ describe("ok-fine end to end", () => {
     expect(challenge).toContain('scope="okf:write"');
   });
 
+  it("serves metrics to a read-only token", async () => {
+    const token = await issuer.mintToken({ scope: "okf:read" });
+    const res = await fetch(`${server.url}/api/v1/metrics`, { headers: { authorization: `Bearer ${token}` } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ window: "24h" });
+  });
+
   it("rejects unauthenticated request with large body immediately without buffering", async () => {
     const url = new URL(server.url);
     const result = await new Promise<string>((resolve, reject) => {
@@ -404,6 +412,20 @@ describe("ok-fine with AUTH_MODE=none", () => {
     });
     expect(created.isError).toBeFalsy();
     await client.close();
+  });
+
+  it("reports service and storage metrics over REST and persists them under DATA_DIR", async () => {
+    const res = await fetch(`${noneServer.url}/api/v1/metrics?window=1h`);
+    expect(res.status).toBe(200);
+    const report: MetricsReport = await res.json();
+    expect(report.operations.find((o) => o.layer === "service" && o.op === "createProject")?.count).toBeGreaterThan(0);
+    expect(report.operations).toContainEqual(expect.objectContaining({ layer: "storage", op: "transaction" }));
+
+    const bad = await fetch(`${noneServer.url}/api/v1/metrics?window=2h`);
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ error: { code: "bad_request" } });
+
+    await fs.stat(path.join(noneDataDir, "metrics.sqlite"));
   });
 
   it("exposes routing metadata on MCP and REST list_projects and filters by team and query", async () => {

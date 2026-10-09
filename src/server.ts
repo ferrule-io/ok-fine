@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   type AuthInfo,
@@ -14,10 +15,13 @@ import { JwtTokenVerifier, principalFromAuthInfo } from "./auth/verifier.js";
 import type { Config, Logger, StorageConfig } from "./config.js";
 import { OkfError } from "./errors.js";
 import { registerMcpRoute } from "./http/mcp-route.js";
+import { registerMetricsRoutes } from "./http/metrics.js";
 import { registerRestRoutes } from "./http/rest.js";
 import { DEFAULT_UI_DIR, endpointOrigins, registerUiRoutes } from "./http/ui.js";
 import { createLocalHost, type RunningLocalHost } from "./local-host.js";
 import { createMcpServer } from "./mcp/server.js";
+import { InstrumentedStorage, instrumentService } from "./metrics/instrument.js";
+import { METRICS_DB_FILE, MetricsStore } from "./metrics/store.js";
 import { KnowledgeService } from "./service/knowledge-service.js";
 import type { Principal } from "./service/principal.js";
 import { Catalog } from "./store/catalog.js";
@@ -274,10 +278,8 @@ export async function startServer(config: Config, options: StartServerOptions = 
     };
   }
 
-  const storage = await GitBackend.open(config, app.log);
-  const catalog = new Catalog();
-  const service = new KnowledgeService({ config, storage, catalog, log: app.log });
-  await service.initialize();
+  const knowledge = await openKnowledge(config, app.log);
+  const service = knowledge.service;
   const mcpHandler = createMcpHandler(
     ({ authInfo }) => {
       if (!authInfo) throw new Error("MCP request reached the handler without authInfo");
@@ -342,6 +344,7 @@ export async function startServer(config: Config, options: StartServerOptions = 
     });
     registerMcpRoute(secured, (request, options) => mcpHandler.fetch(request, options), config.publicBaseUrl);
     registerRestRoutes(secured, service);
+    registerMetricsRoutes(secured, knowledge.metrics);
   });
 
   const stopSync = startPeriodicSync(config, service, app.log);
@@ -357,7 +360,7 @@ export async function startServer(config: Config, options: StartServerOptions = 
   } catch (err) {
     stopSync();
     await localHost?.close();
-    await storage.close();
+    await knowledge.close();
     await mcpHandler.close();
     throw err;
   }
@@ -369,10 +372,48 @@ export async function startServer(config: Config, options: StartServerOptions = 
       stopSync();
       await localHost?.close();
       await app.close();
-      await storage.close();
+      await knowledge.close();
       await mcpHandler.close();
     },
   };
+}
+
+interface OpenedKnowledge {
+  service: KnowledgeService;
+  metrics: MetricsStore;
+  /** Closes storage first, so in-flight transactions commit before the final metrics flush. */
+  close(): Promise<void>;
+}
+
+/** Opens git storage, the metrics database under DATA_DIR, and the instrumented service on top of them. */
+async function openKnowledge(config: StorageConfig, log: Logger): Promise<OpenedKnowledge> {
+  // Creates DATA_DIR, which the metrics database lives in.
+  const git = await GitBackend.open(config, log);
+  let metrics: MetricsStore;
+  try {
+    metrics = await MetricsStore.open({
+      path: join(config.dataDir, METRICS_DB_FILE),
+      retentionDays: config.metricsRetentionDays,
+      log,
+    });
+  } catch (err) {
+    await git.close();
+    throw err;
+  }
+  const storage = new InstrumentedStorage(git, metrics);
+  const close = async (): Promise<void> => {
+    await storage.close();
+    metrics.close();
+  };
+  // Not instrumented yet: the startup catalog rebuild records storage calls but no service op.
+  const raw = new KnowledgeService({ config, storage, catalog: new Catalog(), log });
+  try {
+    await raw.initialize();
+  } catch (err) {
+    await close();
+    throw err;
+  }
+  return { service: instrumentService(raw, metrics), metrics, close };
 }
 
 /** Runs `service.syncNow()` every GIT_SYNC_INTERVAL_SECONDS when a remote is configured; returns a stop function. */
@@ -405,10 +446,8 @@ export interface LocalHostOptions {
 /** Starts the local endpoint host that listens on a domain socket / named pipe. */
 export async function startLocalHost(config: StorageConfig, options: LocalHostOptions): Promise<RunningLocalHost> {
   const { log } = options;
-  const storage = await GitBackend.open(config, log);
-  const catalog = new Catalog();
-  const service = new KnowledgeService({ config, storage, catalog, log });
-  await service.initialize();
+  const knowledge = await openKnowledge(config, log);
+  const service = knowledge.service;
 
   const stopSync = startPeriodicSync(config, service, log);
   const host = await createLocalHost({ service, config, log });
@@ -421,7 +460,7 @@ export async function startLocalHost(config: StorageConfig, options: LocalHostOp
         stopSync();
         await host.close();
         // Waits for the storage mutex, so an in-flight write still commits.
-        await storage.close();
+        await knowledge.close();
       })();
       return closing;
     },

@@ -1,5 +1,15 @@
 import { clsx } from "clsx";
-import { Check, ChevronsUpDown, FolderKanban, HeartPulse, History, LayoutDashboard, Search, X } from "lucide-react";
+import {
+  Check,
+  ChevronsUpDown,
+  FolderKanban,
+  Gauge,
+  HeartPulse,
+  History,
+  LayoutDashboard,
+  Search,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router";
 import { useProjects } from "../api/queries.js";
@@ -259,6 +269,20 @@ export function Sidebar({ project, drawerOpen, onCloseDrawer }: SidebarProps) {
                 >
                   <Search size={14} className="text-muted" />
                   <span>Search</span>
+                </NavLink>
+
+                <NavLink
+                  to="/metrics"
+                  onClick={onCloseDrawer}
+                  className={({ isActive }) =>
+                    clsx(
+                      "flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                      isActive ? "bg-surface-2 text-fg" : "text-muted hover:text-fg hover:bg-surface-2",
+                    )
+                  }
+                >
+                  <Gauge size={14} className="text-muted" />
+                  <span>Metrics</span>
                 </NavLink>
               </nav>
 
