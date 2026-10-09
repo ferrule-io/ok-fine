@@ -110,6 +110,9 @@ describe("loadConfig", () => {
     ["DEFAULT_STALE_AFTER_DAYS", "36501"],
     ["DEFAULT_STALE_AFTER_DAYS", "abc"],
     ["DEFAULT_STALE_AFTER_DAYS", "1.5"],
+    ["METRICS_RETENTION_DAYS", "0"],
+    ["METRICS_RETENTION_DAYS", "3651"],
+    ["METRICS_RETENTION_DAYS", "1.5"],
   ])("rejects %s=%s naming the variable", (name, value) => {
     expect(() => loadConfig({ ...required, [name]: value })).toThrow(name);
   });
@@ -154,6 +157,11 @@ describe("loadConfig", () => {
     expect(loadConfig({ ...required, DEFAULT_STALE_AFTER_DAYS: "180" }).defaultStaleAfterDays).toBe(180);
     expect(loadConfig({ ...required, DEFAULT_STALE_AFTER_DAYS: "1" }).defaultStaleAfterDays).toBe(1);
     expect(loadConfig({ ...required, DEFAULT_STALE_AFTER_DAYS: "36500" }).defaultStaleAfterDays).toBe(36500);
+  });
+
+  it("loads METRICS_RETENTION_DAYS with a 30-day default", () => {
+    expect(loadConfig(required).metricsRetentionDays).toBe(30);
+    expect(loadConfig({ ...required, METRICS_RETENTION_DAYS: "7" }).metricsRetentionDays).toBe(7);
   });
 
   describe("TRUST_PROXY parsing", () => {

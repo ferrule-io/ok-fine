@@ -5,6 +5,8 @@ const dtf = new Intl.DateTimeFormat(undefined, {
   timeStyle: "short",
 });
 
+const nf = new Intl.NumberFormat();
+
 export function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) {
@@ -87,4 +89,16 @@ export function actorKind(actor: string): "human" | "agent" {
 
 export function shortSha(sha: string): string {
   return sha.slice(0, 7);
+}
+
+export function formatMs(ms: number): string {
+  if (ms < 1) return `${ms.toFixed(2)} ms`;
+  if (ms < 10) return `${ms.toFixed(1)} ms`;
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const s = ms / 1000;
+  return `${s < 10 ? s.toFixed(2) : s.toFixed(1)} s`;
+}
+
+export function formatCount(n: number): string {
+  return nf.format(n);
 }

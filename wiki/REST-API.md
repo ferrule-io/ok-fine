@@ -27,6 +27,7 @@ updates or `If-None-Match: *` for create-only PUTs of concepts and files (other 
 | GET | `/search` | read | `q` (max 512 chars), `project`, `type`, `tag` (repeatable), `status`, `trustTier`, `stale`, `limit` |
 | GET | `/sync` | read | remote sync status |
 | POST | `/sync` | admin | sync now |
+| GET | `/metrics` | read | `?window=1h\|24h\|7d\|30d` (default `24h`); call counts, client/server errors, and latency (avg, p50, p95, p99, max) per service operation and storage call, plus a time series. Aggregated per minute in `DATA_DIR/metrics.sqlite`; no project names are recorded |
 
 Errors use one shape: `{ "error": { "code", "message", "details"? } }`. Codes include `bad_request`, `invalid_id`,
 `invalid_actor`, `forbidden_actor`, `forbidden`, `project_not_found`, `not_found`, `already_exists`, `revision_conflict`,

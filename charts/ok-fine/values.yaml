@@ -17,6 +17,7 @@ config:
   maxFileBytes: 1048576
   maxArchiveBytes: 52428800
   defaultStaleAfterDays: null  # opt-in: stamps stale_after = now + N days on write_concept when omitted
+  metricsRetentionDays: 30     # days of hourly performance metrics kept in /data/metrics.sqlite
   trustProxy: ""               # optional: boolean, integer hop count, or CIDR/keyword string (e.g. "loopback,linklocal,uniquelocal")
 auth:
   mode: oidc         # oidc (default) validates JWTs from oauth.issuer; none disables authentication entirely — every request gets admin access; local testing only, unauthenticated admin access must not be routed publicly (ingress and httpRoute must be disabled; use kubectl port-forward)

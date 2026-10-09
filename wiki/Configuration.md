@@ -34,9 +34,10 @@ message naming every bad variable.
 | `MAX_FILE_BYTES` | `1048576` | Max size of one concept or file |
 | `MAX_ARCHIVE_BYTES` | `52428800` | Max compressed archive upload |
 | `DEFAULT_STALE_AFTER_DAYS` | unset | Opt-in; stamps `stale_after` = now + N days on `write_concept` when omitted; producer value wins |
+| `METRICS_RETENTION_DAYS` | `30` | Days of hourly performance metrics kept in `DATA_DIR/metrics.sqlite` (1–3650); per-minute rows are kept 48 hours |
 | `PROJECT_ACCESS` | unset | JSON string mapping project names to `{ "readGroups": [...], "writeGroups": [...] }` for per-project access control. Unlisted projects are open. |
 | `PROJECT_ACCESS_FILE` | unset | Path to a JSON file containing the project access mapping (alternative to `PROJECT_ACCESS`, useful for ConfigMap mounts) |
 
 Over stdio (`ok-fine` with no command), only `LOG_LEVEL`, `DATA_DIR`, `GIT_*`, `MAX_*`, `PROJECT_ACCESS*`,
-`DEFAULT_STALE_AFTER_DAYS`, and `HUB_PROJECT` apply. The CLI (stdio and `ok-fine serve`) runs git with your environment and
+`DEFAULT_STALE_AFTER_DAYS`, `METRICS_RETENTION_DAYS`, and `HUB_PROJECT` apply. The CLI (stdio and `ok-fine serve`) runs git with your environment and
 credentials; the container isolates git under `DATA_DIR/home`.

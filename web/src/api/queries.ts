@@ -1,4 +1,5 @@
 import { keepPreviousData, QueryClient, type UseQueryResult, useQuery } from "@tanstack/react-query";
+import type { MetricsReport, MetricsWindow } from "../../../src/metrics/types.js";
 import type { LintIssue } from "../../../src/okf/lint.js";
 import type {
   ConceptView,
@@ -11,6 +12,7 @@ import type { SearchHit } from "../../../src/store/catalog.js";
 import {
   ApiError,
   getIndex,
+  getMetrics,
   getProject,
   history,
   lint,
@@ -46,6 +48,7 @@ export const queryKeys = {
   lint: (p: string) => ["lint", p] as const,
   search: (params: SearchParams) => ["search", params] as const,
   sync: () => ["sync"] as const,
+  metrics: (window: MetricsWindow) => ["metrics", window] as const,
 };
 
 export function useProjects(): UseQueryResult<ProjectSummary[], Error> {
@@ -122,5 +125,14 @@ export function useSyncStatus(): UseQueryResult<SyncStatus, Error> {
     queryKey: queryKeys.sync(),
     queryFn: syncStatus,
     refetchInterval: 60_000,
+  });
+}
+
+export function useMetrics(window: MetricsWindow): UseQueryResult<MetricsReport, Error> {
+  return useQuery({
+    queryKey: queryKeys.metrics(window),
+    queryFn: () => getMetrics(window),
+    refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
   });
 }

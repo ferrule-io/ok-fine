@@ -16,6 +16,7 @@ export function Breadcrumbs({ className }: { className?: string }) {
   const isActivity = location.pathname.endsWith("/activity");
   const isHealth = location.pathname.endsWith("/health");
   const isSearch = location.pathname === "/search";
+  const isMetrics = location.pathname === "/metrics";
 
   const conceptQuery = useConcept(project ?? "", isConcept ? (wildcard ?? "") : "");
   const conceptTitle = conceptQuery.data?.derived?.title ?? (wildcard ? wildcard.split("/").pop() : "");
@@ -34,7 +35,7 @@ export function Breadcrumbs({ className }: { className?: string }) {
         to="/"
         className={clsx(
           "transition-colors shrink-0",
-          !project && !isSearch ? "font-medium text-fg" : "text-muted hover:text-fg",
+          !project && !isSearch && !isMetrics ? "font-medium text-fg" : "text-muted hover:text-fg",
         )}
       >
         Projects
@@ -44,6 +45,13 @@ export function Breadcrumbs({ className }: { className?: string }) {
         <>
           {separator}
           <span className="font-medium text-fg truncate">Search</span>
+        </>
+      )}
+
+      {isMetrics && (
+        <>
+          {separator}
+          <span className="font-medium text-fg truncate">Metrics</span>
         </>
       )}
 

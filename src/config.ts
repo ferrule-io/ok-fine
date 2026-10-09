@@ -49,6 +49,7 @@ export interface StorageConfig {
   maxFileBytes: number;
   maxArchiveBytes: number;
   defaultStaleAfterDays?: number;
+  metricsRetentionDays: number;
   projectAccess: Record<string, ProjectAccess>;
 }
 
@@ -165,6 +166,7 @@ const storageEnvShape = {
   MAX_FILE_BYTES: intEnv("MAX_FILE_BYTES", "1048576", 1),
   MAX_ARCHIVE_BYTES: intEnv("MAX_ARCHIVE_BYTES", "52428800", 1),
   DEFAULT_STALE_AFTER_DAYS: optionalIntEnv("DEFAULT_STALE_AFTER_DAYS", 1, 36500),
+  METRICS_RETENTION_DAYS: intEnv("METRICS_RETENTION_DAYS", "30", 1, 3650),
   PROJECT_ACCESS: z.string().optional(),
   PROJECT_ACCESS_FILE: z.string().optional(),
 };
@@ -455,6 +457,7 @@ function storageFromRaw(
     maxFileBytes: raw.MAX_FILE_BYTES,
     maxArchiveBytes: raw.MAX_ARCHIVE_BYTES,
     defaultStaleAfterDays: raw.DEFAULT_STALE_AFTER_DAYS,
+    metricsRetentionDays: raw.METRICS_RETENTION_DAYS,
     projectAccess: parseProjectAccess(raw.PROJECT_ACCESS, raw.PROJECT_ACCESS_FILE),
   };
 }

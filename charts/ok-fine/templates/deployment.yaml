@@ -91,6 +91,8 @@ spec:
             - name: DEFAULT_STALE_AFTER_DAYS
               value: {{ . | int | quote }}
             {{- end }}
+            - name: METRICS_RETENTION_DAYS
+              value: {{ .Values.config.metricsRetentionDays | int | quote }}
             {{- if or .Values.config.trustProxy (eq (printf "%v" .Values.config.trustProxy) "false") }}
             - name: TRUST_PROXY
               value: {{ .Values.config.trustProxy | quote }}
