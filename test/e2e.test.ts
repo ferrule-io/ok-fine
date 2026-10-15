@@ -698,3 +698,141 @@ describe("ok-fine over stdio", () => {
     await stdioServer.close();
   });
 });
+
+describe("ok-fine with AUTH_MODE=api_key", () => {
+  let apiKeyServer: RunningServer;
+  let apiKeyDataDir: string;
+  const readSecret = "0123456789abcdef0123456789abcdef";
+  const adminSecret = "fedcba9876543210fedcba9876543210";
+
+  beforeAll(async () => {
+    apiKeyDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "okf-api-key-"));
+    const config = loadConfig({
+      AUTH_MODE: "api_key",
+      API_KEYS: `reader:read:${readSecret},admin:admin:${adminSecret}`,
+      PORT: "0",
+      HOST: "127.0.0.1",
+      DATA_DIR: apiKeyDataDir,
+      PUBLIC_BASE_URL: "http://127.0.0.1",
+      LOG_LEVEL: "silent",
+    });
+    apiKeyServer = await startServer(config);
+  });
+
+  afterAll(async () => {
+    await apiKeyServer?.close();
+    if (apiKeyDataDir) await fs.rm(apiKeyDataDir, { recursive: true, force: true });
+  });
+
+  it("serves /healthz with 200 without key", async () => {
+    const res = await fetch(`${apiKeyServer.url}/healthz`);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ status: "ok" });
+  });
+
+  it("returns 401 unauthorized when no key is presented", async () => {
+    const res = await fetch(`${apiKeyServer.url}/api/v1/projects`);
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("unauthorized");
+    expect(body.error.message).toBe("missing or invalid API key");
+  });
+
+  it("allows GET /api/v1/projects with read key but forbids write routes", async () => {
+    const getRes = await fetch(`${apiKeyServer.url}/api/v1/projects`, {
+      headers: { "x-api-key": readSecret },
+    });
+    expect(getRes.status).toBe(200);
+
+    const postRes = await fetch(`${apiKeyServer.url}/api/v1/projects`, {
+      method: "POST",
+      headers: {
+        "x-api-key": readSecret,
+        "content-type": "application/json",
+        "x-okf-actor": "agent/1.0",
+      },
+      body: JSON.stringify({ project: "test-proj", title: "Test Project" }),
+    });
+    expect(postRes.status).toBe(403);
+    const body = (await postRes.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("forbidden");
+    expect(body.error.message).toBe("requires okf:write");
+  });
+
+  it("admin key works via both x-api-key and Authorization: Bearer", async () => {
+    const headerRes = await fetch(`${apiKeyServer.url}/api/v1/projects`, {
+      headers: { "x-api-key": adminSecret },
+    });
+    expect(headerRes.status).toBe(200);
+
+    const bearerRes = await fetch(`${apiKeyServer.url}/api/v1/projects`, {
+      headers: { Authorization: `Bearer ${adminSecret}` },
+    });
+    expect(bearerRes.status).toBe(200);
+  });
+
+  it("MCP client over /mcp with the header can list tools", async () => {
+    const mcpClient = new Client({ name: "e2e-api-key", version: "1.0.0" });
+    await mcpClient.connect(
+      new StreamableHTTPClientTransport(new URL(`${apiKeyServer.url}/mcp`), {
+        requestInit: { headers: { "x-api-key": adminSecret } },
+      }),
+    );
+    const { tools } = await mcpClient.listTools();
+    expect(tools.length).toBeGreaterThan(0);
+    expect(tools.map((t) => t.name).sort()).toEqual(ALL_TOOLS);
+    await mcpClient.close();
+  });
+});
+
+describe("ok-fine with AUTH_MODE=oidc and API_KEYS", () => {
+  let oidcKeyServer: RunningServer;
+  let oidcKeyDataDir: string;
+  const oidcAdminSecret = "fedcba9876543210fedcba9876543210";
+
+  beforeAll(async () => {
+    oidcKeyDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "okf-oidc-key-"));
+    const config = loadConfig({
+      AUTH_MODE: "oidc",
+      OAUTH_ISSUER: issuer.url,
+      OAUTH_ALLOW_INSECURE_ISSUER: "true",
+      API_KEYS: `admin:admin:${oidcAdminSecret}`,
+      PORT: "0",
+      HOST: "127.0.0.1",
+      DATA_DIR: oidcKeyDataDir,
+      PUBLIC_BASE_URL: PUBLIC,
+      LOG_LEVEL: "silent",
+    });
+    oidcKeyServer = await startServer(config);
+  });
+
+  afterAll(async () => {
+    await oidcKeyServer?.close();
+    if (oidcKeyDataDir) await fs.rm(oidcKeyDataDir, { recursive: true, force: true });
+  });
+
+  it("authenticates with API key", async () => {
+    const res = await fetch(`${oidcKeyServer.url}/api/v1/projects`, {
+      headers: { "x-api-key": oidcAdminSecret },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("authenticates with dev-issuer JWT", async () => {
+    const token = await issuer.mintToken({ scope: "okf:read" });
+    const res = await fetch(`${oidcKeyServer.url}/api/v1/projects`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("returns 401 when wrong x-api-key is sent", async () => {
+    const res = await fetch(`${oidcKeyServer.url}/api/v1/projects`, {
+      headers: { "x-api-key": "invalid-secret-that-does-not-match-anything" },
+    });
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("unauthorized");
+    expect(body.error.message).toBe("missing or invalid API key");
+  });
+});

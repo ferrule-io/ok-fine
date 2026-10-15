@@ -8,7 +8,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 export const DEFAULT_UI_DIR = fileURLToPath(new URL("../../dist/ui/", import.meta.url));
 
 export interface UiClientConfig {
-  authMode: "oidc" | "none";
+  authMode: "oidc" | "none" | "api_key";
   oauthClientId: string | null;
   scope: string;
   version: string;

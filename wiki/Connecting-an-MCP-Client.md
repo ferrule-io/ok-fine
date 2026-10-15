@@ -43,6 +43,53 @@ Clients that take a static header can pass `Authorization: Bearer <token>` direc
   }
 }
 ```
+When running with `AUTH_MODE=api_key` (or when API keys are enabled in `oidc` mode, see
+[Authentication and authorization](https://github.com/ferrule-io/ok-fine/wiki/Authentication-and-Authorization)),
+clients authenticate by passing the API key in the configured header (default `X-API-Key`) or as a Bearer token in
+the `Authorization` header.
+
+Using the Claude Code CLI:
+
+```sh
+claude mcp add --transport http ok-fine https://okf.example.com/mcp --header "X-API-Key: <key>"
+```
+
+In generic MCP client configuration (`mcpServers` JSON), pass the header in `headers`:
+
+```json
+{
+  "mcpServers": {
+    "ok-fine": {
+      "type": "http",
+      "url": "https://okf.example.com/mcp",
+      "headers": {
+        "X-API-Key": "<key>"
+      }
+    }
+  }
+}
+```
+
+Alternatively, pass the key as a static Bearer token:
+
+```json
+{
+  "mcpServers": {
+    "ok-fine": {
+      "type": "http",
+      "url": "https://okf.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <key>"
+      }
+    }
+  }
+}
+```
+
+> **Note:** Clients that only support dynamic OAuth discovery (and cannot be configured with custom headers or a static
+> token) cannot connect in `AUTH_MODE=api_key` because OAuth discovery endpoints are not registered. Such clients can
+> use `Authorization: Bearer <key>` only if they allow specifying a static bearer token.
+
 
 The server sends usage instructions to the client on connect (note: claude.ai and Claude Desktop drop `instructions`, so the same routing guidance is included in the `list_projects` and `search_concepts` tool descriptions). In short:
 1. If a project is named explicitly by the user or workspace instructions, use it.

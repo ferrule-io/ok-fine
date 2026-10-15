@@ -1,7 +1,15 @@
-{{- if not (has .Values.auth.mode (list "oidc" "none")) -}}
-{{- fail "auth.mode must be \"oidc\" or \"none\"" -}}
+{{- if not (has .Values.auth.mode (list "oidc" "api_key" "none")) -}}
+{{- fail "auth.mode must be \"oidc\", \"api_key\", or \"none\"" -}}
+{{- end -}}
+{{- if eq .Values.auth.mode "api_key" -}}
+{{- if not (and .Values.apiKeys .Values.apiKeys.existingSecret) -}}
+{{- fail "apiKeys.existingSecret is required when auth.mode is \"api_key\"" -}}
+{{- end -}}
 {{- end -}}
 {{- if eq .Values.auth.mode "none" -}}
+{{- if and .Values.apiKeys .Values.apiKeys.existingSecret -}}
+{{- fail "apiKeys cannot be set when auth.mode is \"none\"" -}}
+{{- end -}}
 {{- if or .Values.ingress.enabled .Values.httpRoute.enabled -}}
 {{- fail "unauthenticated admin access must not be routed publicly; use kubectl port-forward" -}}
 {{- end -}}
@@ -102,6 +110,17 @@ spec:
             {{- if eq .Values.auth.mode "none" }}
             - name: ALLOW_UNAUTHENTICATED_NETWORK
               value: "true"
+            {{- end }}
+            {{- if and .Values.apiKeys .Values.apiKeys.header }}
+            - name: API_KEY_HEADER
+              value: {{ .Values.apiKeys.header | quote }}
+            {{- end }}
+            {{- if and (ne .Values.auth.mode "none") .Values.apiKeys .Values.apiKeys.existingSecret }}
+            - name: API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiKeys.existingSecret | quote }}
+                  key: {{ default "API_KEYS" .Values.apiKeys.secretKey | quote }}
             {{- end }}
             {{- if eq .Values.auth.mode "oidc" }}
             - name: OAUTH_ISSUER
