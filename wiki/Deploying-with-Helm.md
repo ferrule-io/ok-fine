@@ -30,10 +30,45 @@ helm upgrade okf oci://ghcr.io/ferrule-io/charts/ok-fine --reuse-values \
 ```
 
 For HTTPS, use `git.remote.auth=https` and a Secret with `username` and `password` keys (e.g. a fine-grained token).
+## Deploying with API keys (`auth.mode=api_key`)
+
+To use static API keys instead of an external OIDC provider, create a Kubernetes Secret containing the `API_KEYS` string:
+
+```sh
+kubectl -n okf create secret generic ok-fine-api-keys \
+  --from-literal=API_KEYS='ci:read:c988a8d1160d5b4a45e7f12e8738a9bc6f6983a9394602f928e4695ce09b917d,deploy:admin:1e976694e97a3a8301140939d84f88eef0ff268571cb1a18290f9b6b7a0d18f8'
+```
+
+Then deploy with `auth.mode=api_key` and reference the Secret in `apiKeys.existingSecret`:
+
+```yaml
+config:
+  publicBaseUrl: https://okf.example.com
+
+auth:
+  mode: api_key
+
+apiKeys:
+  existingSecret: ok-fine-api-keys
+  secretKey: API_KEYS       # default: API_KEYS
+  header: x-api-key         # optional custom header, default: x-api-key
+
+ingress:
+  enabled: true
+  className: nginx
+  tls:
+    secretName: okf-tls
+```
+
+The chart injects `API_KEYS` via `secretKeyRef` and does not require `oauth.issuer`. Template rendering will fail if `auth.mode` is `api_key` and `apiKeys.existingSecret` is not provided.
+
 
 Other notable values:
 
-- `auth.mode`: `oidc` (default) or `none`. Use `none` only for local testing where authentication is skipped; because `none` grants every caller full admin access, ingress and httpRoute must be disabled (the chart fails validation if either is enabled with `auth.mode=none`), and access must be via `kubectl -n okf port-forward svc/okf 8080:8080`. The chart automatically sets `ALLOW_UNAUTHENTICATED_NETWORK=true` when `auth.mode=none`.
+- `auth.mode`: `oidc` (default), `api_key`, or `none`. Use `api_key` for pre-shared static keys from `apiKeys.existingSecret` without an external IdP. Use `none` only for local testing where authentication is skipped; because `none` grants every caller full admin access, ingress and httpRoute must be disabled (the chart fails validation if either is enabled with `auth.mode=none`), and access must be via `kubectl -n okf port-forward svc/okf 8080:8080`. The chart automatically sets `ALLOW_UNAUTHENTICATED_NETWORK=true` when `auth.mode=none`.
+- `apiKeys.existingSecret`: name of a pre-created Secret containing `API_KEYS` (REQUIRED when `auth.mode=api_key`; optional in `oidc` mode).
+- `apiKeys.secretKey`: key within `existingSecret` holding the `API_KEYS` string (default: `API_KEYS`).
+- `apiKeys.header`: optional custom request header for API keys (default: `x-api-key`).
 - `config.trustProxy`: configure Fastify proxy trust (e.g. `"loopback,linklocal,uniquelocal"`, a boolean, or hop count; passed as `TRUST_PROXY`).
 - `oauth.allowedSubjects`: list of allowed JWT `sub` claims.
 - `oauth.allowedEmails`: list of allowed verified email addresses (case-insensitive).

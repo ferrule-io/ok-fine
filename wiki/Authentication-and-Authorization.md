@@ -1,9 +1,9 @@
-ok-fine supports two authentication modes configured via `AUTH_MODE`:
+ok-fine supports three authentication modes configured via `AUTH_MODE`:
 
 - **`oidc` (default):** ok-fine acts as an OAuth 2.1 **resource server only**. It issues no tokens; it validates JWT
-  access tokens from any OIDC / RFC 8414 provider (Keycloak, Auth0, Okta, Zitadel, …).
+  access tokens from any OIDC / RFC 8414 provider (Keycloak, Auth0, Okta, Zitadel, …). Static API keys can optionally be enabled in addition to JWTs.
+- **`api_key`:** Standalone authentication using pre-shared API keys. Requires no external identity provider.
 - **`none`:** Insecure mode for local development and Docker testing. Authentication is completely disabled.
-
 # Insecure mode (`AUTH_MODE=none`)
 
 When `AUTH_MODE=none`:
@@ -20,6 +20,87 @@ When `AUTH_MODE=none`:
   - Scopes: read, write, and admin scopes (full admin access: `canRead`, `canWrite`, `canAdmin` all true)
 - Because identity is `null`, `human:<id>` actors are rejected with `forbidden_actor`. Use `<producer>/<version>` (e.g. `cli/1.0`, `claude-code/claude-opus-4-5`) or `process:<id>` actors instead.
 - A warning is logged at startup. **Never expose `AUTH_MODE=none` beyond localhost.**
+
+# API key authentication
+
+ok-fine supports static pre-shared API keys configured via the `API_KEYS` environment variable.
+
+## Modes
+
+API keys operate in two modes:
+
+- **Standalone (`AUTH_MODE=api_key`):** Authentication relies solely on configured API keys. `API_KEYS` is required (at least one key must be defined). All `OAUTH_*` environment variables are ignored (no `OAUTH_ISSUER` required), loopback `HOST` is not required, and OAuth discovery endpoints (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-protected-resource/mcp`, and `/.well-known/oauth-authorization-server`) are not registered.
+- **Additive in OIDC (`AUTH_MODE=oidc`):** When `API_KEYS` is set in `oidc` mode, API keys are accepted **in addition** to JWT access tokens. If `API_KEYS` is unset or empty, only OIDC tokens are accepted.
+- **Disabled in insecure mode (`AUTH_MODE=none`):** Setting `API_KEYS` when `AUTH_MODE=none` is a configuration error and prevents server startup (`API_KEYS has no effect when AUTH_MODE=none`).
+
+## Entry format
+
+API keys are configured as a comma-separated list of entries in `API_KEYS`:
+
+```
+API_KEYS="<name>:<permission>:<secret>,<name2>:<permission2>:<secret2>"
+```
+
+- Entries are separated by commas. Surrounding whitespace around each entry is trimmed; empty entries are ignored.
+- Each entry is split on the **first two colons only** (`<name>:<permission>:<secret>`). The secret itself may contain colons.
+- **`name`:** Identifier matching `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`. Each key name must be unique.
+- **`permission`:** One of `read`, `write`, or `admin`.
+- **`secret`:** At least 32 characters, containing no whitespace and no commas (`,`). Must be unique across entries. Generate cryptographically secure keys with:
+  ```sh
+  openssl rand -hex 32
+  ```
+- **Safe diagnostics:** Validation error messages never contain secret values; they identify entries by name or 1-based index only.
+
+## Presenting keys: header vs. Bearer
+
+Clients can present an API key in either of two ways:
+
+1. **Configured header:** Sent via the request header defined by `API_KEY_HEADER` (default: `x-api-key`, lowercased, matching `^[A-Za-z0-9-]+$`, cannot be `authorization`). The header carries the raw secret value.
+2. **Authorization header:** Sent as `Authorization: Bearer <secret>`.
+
+### Request verification
+
+- Key comparison is constant-time across all configured keys: secrets are compared using SHA-256 digests and `crypto.timingSafeEqual`, scanning all keys without early exit.
+- **In `api_key` mode:** A missing or invalid key returns HTTP 401 Unauthorized (`{"error": {"code": "unauthorized", "message": "missing or invalid API key"}}`). A request lacking the required scope returns HTTP 403 Forbidden (`{"error": {"code": "forbidden", "message": "requires <scope name>"}}`).
+- **In `oidc` mode with keys:** If the configured API key header (`x-api-key`) is present but does not match any key, the request returns HTTP 401. If `Authorization: Bearer <value>` matches an API key secret, it is authenticated as that key's principal; otherwise, it falls through to standard OIDC JWT validation.
+- Configured API key headers are redacted from Fastify access logs alongside `authorization`. Server startup logs only key names and permissions, never secrets.
+- `/healthz` remains unauthenticated.
+
+## Permissions and scopes
+
+Each API key permission grants specific scopes (using the configured scope names, default `okf:read`, `okf:write`, `okf:admin`):
+
+| Permission | Granted scopes | Capabilities |
+|---|---|---|
+| `read` | `[okf:read]` | Read tools and endpoints (`get_index`, `read_concept`, `search_concepts`, `orient`, etc.) |
+| `write` | `[okf:read, okf:write]` | Read + write tools and endpoints (`write_concept`, `verify_concept`, `write_file`, etc.) |
+| `admin` | `[okf:read, okf:write, okf:admin]` | Full access, including project deletion, archive import, and git sync |
+
+## Identity and access control
+
+When authenticated via an API key, the request principal is assigned:
+- **Client ID:** `api-key:<name>`
+- **Subject (`sub`):** `api-key:<name>`
+- **Identity:** `null`
+- **Groups:** `[]` (empty list)
+
+Because identity is `null`, **`human:<id>` actors are rejected with `forbidden_actor`**. Mutating operations must use tool/agent actors (such as `<producer>/<version>`, e.g. `cli/1.0`, `claude-code/claude-opus-4-5`) or `process:<id>`.
+
+Because groups are empty (`groups: []`), API keys with `read` or `write` permissions cannot access projects with [per-project access control](#project-access-control) (`readGroups` / `writeGroups`). Only `admin` API keys bypass group restrictions via admin bypass.
+
+## Key rotation
+
+To rotate an API key without downtime:
+
+1. Generate a new secret: `openssl rand -hex 32`.
+2. Add the new key to `API_KEYS` under a new name (e.g. `ci-v2:write:<new-secret>`) alongside the existing key.
+3. Redeploy or restart ok-fine. Both keys are now valid.
+4. Update clients to use the new key.
+5. Remove the old key entry from `API_KEYS` and redeploy ok-fine.
+
+## Production security
+
+Always serve ok-fine over **HTTPS** in production so API keys are encrypted in transit and never leaked on the network.
 
 # OIDC mode (`AUTH_MODE=oidc`)
 
@@ -111,6 +192,8 @@ The UI needs a public client at your provider:
   `audience` parameter must enable RFC 8707 `resource` support.
 - Or leave it unset: the UI then registers itself through dynamic client registration when the provider advertises
   `registration_endpoint`. With neither, the UI shows a "Sign-in isn't configured" page listing these values.
+
+In `AUTH_MODE=api_key`, the web UI prompts the user to enter their API key, stores it in `sessionStorage`, and sends it as `Authorization: Bearer <key>` on all REST API requests. If a request returns HTTP 401, the stored key is cleared and the prompt re-appears. Signing out clears the stored key.
 
 In `AUTH_MODE=none` the UI opens without signing in.
 

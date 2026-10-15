@@ -24,6 +24,10 @@ describe("loadConfig", () => {
         groupsClaim: "groups",
         allowedClientIds: [],
       },
+      apiKeys: {
+        header: "x-api-key",
+        keys: [],
+      },
     });
     expect(config.allowUnauthenticatedNetwork).toBe(false);
     expect(config.trustProxy).toBe("loopback,linklocal,uniquelocal");
@@ -87,7 +91,7 @@ describe("loadConfig", () => {
   );
 
   it("rejects invalid AUTH_MODE with the message", () => {
-    expect(() => loadConfig({ ...required, AUTH_MODE: "invalid" })).toThrow("AUTH_MODE must be oidc or none");
+    expect(() => loadConfig({ ...required, AUTH_MODE: "invalid" })).toThrow("AUTH_MODE must be oidc, none, or api_key");
   });
 
   it("rejects AUTH_MODE=oidc without OAUTH_ISSUER", () => {
@@ -359,6 +363,183 @@ describe("loadConfig", () => {
           PROJECT_ACCESS_FILE: "/nonexistent/path/access.json",
         }),
       ).toThrow("could not read PROJECT_ACCESS_FILE");
+    });
+  });
+
+  describe("API_KEYS and AUTH_MODE=api_key", () => {
+    const validSecret = "a".repeat(32);
+    const validSecret2 = "b".repeat(32);
+
+    it("loads in api_key mode with keys and without OAUTH_ISSUER", () => {
+      const config = loadConfig({
+        PUBLIC_BASE_URL: "https://okf.example.com",
+        AUTH_MODE: "api_key",
+        API_KEYS: `test:read:${validSecret}`,
+      });
+      expect(config.auth).toEqual({
+        mode: "api_key",
+        apiKeys: {
+          header: "x-api-key",
+          keys: [{ name: "test", permission: "read", secret: validSecret }],
+        },
+      });
+      expect(config.host).toBe("0.0.0.0");
+    });
+
+    it("parses name:perm:secret with ':' inside the secret", () => {
+      const secretWithColons = `part1:part2:part3:${"c".repeat(32)}`;
+      const config = loadConfig({
+        PUBLIC_BASE_URL: "https://okf.example.com",
+        AUTH_MODE: "api_key",
+        API_KEYS: `admin-key:admin:${secretWithColons}`,
+      });
+      if (config.auth.mode !== "api_key") {
+        expect.unreachable("expected api_key mode");
+      }
+      expect(config.auth.apiKeys.keys).toEqual([{ name: "admin-key", permission: "admin", secret: secretWithColons }]);
+    });
+
+    it("loads default and custom header (lowercased)", () => {
+      const defaultCfg = loadConfig({
+        PUBLIC_BASE_URL: "https://okf.example.com",
+        AUTH_MODE: "api_key",
+        API_KEYS: `test:read:${validSecret}`,
+      });
+      if (defaultCfg.auth.mode !== "api_key") {
+        expect.unreachable("expected api_key mode");
+      }
+      expect(defaultCfg.auth.apiKeys.header).toBe("x-api-key");
+
+      const customCfg = loadConfig({
+        PUBLIC_BASE_URL: "https://okf.example.com",
+        AUTH_MODE: "api_key",
+        API_KEYS: `test:read:${validSecret}`,
+        API_KEY_HEADER: "X-Custom-Auth-Token",
+      });
+      if (customCfg.auth.mode !== "api_key") {
+        expect.unreachable("expected api_key mode");
+      }
+      expect(customCfg.auth.apiKeys.header).toBe("x-custom-auth-token");
+    });
+
+    it("rejects missing API_KEYS in api_key mode", () => {
+      expect(() =>
+        loadConfig({
+          PUBLIC_BASE_URL: "https://okf.example.com",
+          AUTH_MODE: "api_key",
+        }),
+      ).toThrow("API_KEYS is required when AUTH_MODE=api_key");
+    });
+
+    it("rejects bad permission without echoing a swapped-in secret", () => {
+      let message = "";
+      try {
+        loadConfig({
+          PUBLIC_BASE_URL: "https://okf.example.com",
+          AUTH_MODE: "api_key",
+          API_KEYS: `test:${validSecret}:read`,
+        });
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toContain('entry 1 ("test") has an invalid permission: must be read, write, or admin');
+      expect(message).not.toContain(validSecret);
+    });
+
+    it("rejects short secret and error message does not contain the secret", () => {
+      const shortSecret = "super-secret-short-token";
+      let error: Error | undefined;
+      try {
+        loadConfig({
+          PUBLIC_BASE_URL: "https://okf.example.com",
+          AUTH_MODE: "api_key",
+          API_KEYS: `test:read:${shortSecret}`,
+        });
+      } catch (err) {
+        error = err as Error;
+      }
+      expect(error).toBeDefined();
+      expect(error?.message).toMatch(/secret must be at least 32 characters/);
+      expect(error?.message).not.toContain(shortSecret);
+    });
+
+    it("rejects duplicate name", () => {
+      expect(() =>
+        loadConfig({
+          PUBLIC_BASE_URL: "https://okf.example.com",
+          AUTH_MODE: "api_key",
+          API_KEYS: `dup:read:${validSecret},dup:write:${validSecret2}`,
+        }),
+      ).toThrow('duplicate API key name "dup"');
+    });
+
+    it("rejects duplicate secret", () => {
+      expect(() =>
+        loadConfig({
+          PUBLIC_BASE_URL: "https://okf.example.com",
+          AUTH_MODE: "api_key",
+          API_KEYS: `key1:read:${validSecret},key2:write:${validSecret}`,
+        }),
+      ).toThrow(/duplicate API key secret/);
+    });
+
+    it("rejects header authorization", () => {
+      expect(() =>
+        loadConfig({
+          PUBLIC_BASE_URL: "https://okf.example.com",
+          AUTH_MODE: "api_key",
+          API_KEYS: `test:read:${validSecret}`,
+          API_KEY_HEADER: "Authorization",
+        }),
+      ).toThrow('API_KEY_HEADER must not be "authorization"');
+      expect(() =>
+        loadConfig({
+          PUBLIC_BASE_URL: "https://okf.example.com",
+          AUTH_MODE: "api_key",
+          API_KEYS: `test:read:${validSecret}`,
+          API_KEY_HEADER: "authorization",
+        }),
+      ).toThrow('API_KEY_HEADER must not be "authorization"');
+    });
+
+    it("rejects API_KEYS with AUTH_MODE=none", () => {
+      expect(() =>
+        loadConfig({
+          PUBLIC_BASE_URL: "https://okf.example.com",
+          AUTH_MODE: "none",
+          HOST: "127.0.0.1",
+          API_KEYS: `test:read:${validSecret}`,
+        }),
+      ).toThrow("API_KEYS has no effect when AUTH_MODE=none");
+    });
+
+    it("oidc + API_KEYS yields both JWT config and keys", () => {
+      const config = loadConfig({
+        ...required,
+        API_KEYS: `k1:read:${validSecret}, k2:admin:${validSecret2}`,
+      });
+      if (config.auth.mode !== "oidc") {
+        expect.unreachable("expected oidc mode");
+      }
+      expect(config.auth.issuer).toBe("https://idp.example.com");
+      expect(config.auth.apiKeys).toEqual({
+        header: "x-api-key",
+        keys: [
+          { name: "k1", permission: "read", secret: validSecret },
+          { name: "k2", permission: "admin", secret: validSecret2 },
+        ],
+      });
+    });
+
+    it("oidc without API_KEYS yields apiKeys.keys = []", () => {
+      const config = loadConfig(required);
+      if (config.auth.mode !== "oidc") {
+        expect.unreachable("expected oidc mode");
+      }
+      expect(config.auth.apiKeys).toEqual({
+        header: "x-api-key",
+        keys: [],
+      });
     });
   });
 });

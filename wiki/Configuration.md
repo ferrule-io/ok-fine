@@ -5,8 +5,10 @@ message naming every bad variable.
 | Variable | Default | Description |
 |---|---|---|
 | `PUBLIC_BASE_URL` | **required** (container); `http://localhost:<PORT>` (`ok-fine serve`) | External URL, e.g. `https://okf.example.com`. Used in OAuth metadata. |
-| `AUTH_MODE` | `oidc` | Authentication mode: `oidc` or `none` |
+| `AUTH_MODE` | `oidc` | Authentication mode: `oidc` (default), `api_key`, or `none` |
 | `ALLOW_UNAUTHENTICATED_NETWORK` | `false` | When `AUTH_MODE=none`, allows startup on a non-loopback `HOST` (e.g. inside a container with `-p 127.0.0.1:...`) |
+| `API_KEYS` | unset | Comma-separated `<name>:<permission>:<secret>` entries (`permission`: `read`, `write`, `admin`; `secret`: >= 32 chars, no whitespace or commas). Required when `AUTH_MODE=api_key`; optional in `oidc` mode (keys accepted in addition to JWTs); setting in `none` mode is an error. |
+| `API_KEY_HEADER` | `x-api-key` | Request header carrying the API key (lowercase, `^[A-Za-z0-9-]+$`, cannot be `authorization`). Matched in `api_key` mode and in `oidc` mode when `API_KEYS` is set. |
 | `OAUTH_ISSUER` | required when `AUTH_MODE=oidc` | Must equal the token `iss` exactly (`oidc` mode only) |
 | `OAUTH_AUDIENCE` | `<PUBLIC_BASE_URL>/mcp` | Comma-separated accepted audiences (`oidc` mode only) |
 | `OAUTH_JWKS_URI` | discovered | Override the JWKS URL; must be `https://` unless `OAUTH_ALLOW_INSECURE_ISSUER=true` (`oidc` mode only) |

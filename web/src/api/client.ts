@@ -27,12 +27,14 @@ export interface AuthHooks {
   getToken(): string | null;
   onUnauthorized(): void;
   onForbidden(): void;
+  authMode?(): UiClientConfig["authMode"] | null;
 }
 
 let authHooks: AuthHooks = {
   getToken: () => null,
   onUnauthorized: () => {},
   onForbidden: () => {},
+  authMode: () => null,
 };
 
 export function setAuthHooks(hooks: AuthHooks): void {
@@ -76,6 +78,10 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<Respon
       if (wwwAuth.includes("insufficient_scope")) {
         authHooks.onForbidden();
         throw new ApiError(403, "insufficient_scope", "insufficient scope");
+      }
+      if (authHooks.authMode?.() === "api_key") {
+        authHooks.onForbidden();
+        throw new ApiError(403, "forbidden", "forbidden");
       }
     }
 

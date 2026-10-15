@@ -18,6 +18,19 @@ export interface AccessPolicy {
   allowedClientIds: string[];
 }
 
+export type ApiKeyPermission = "read" | "write" | "admin";
+
+export interface ApiKey {
+  name: string;
+  permission: ApiKeyPermission;
+  secret: string;
+}
+
+export interface ApiKeyConfig {
+  header: string;
+  keys: ApiKey[];
+}
+
 export type AuthConfig =
   | { mode: "none" }
   | {
@@ -30,6 +43,11 @@ export type AuthConfig =
       access: AccessPolicy;
       /** Public OAuth client the web UI signs in with; unset = dynamic client registration. */
       uiClientId?: string;
+      apiKeys: ApiKeyConfig;
+    }
+  | {
+      mode: "api_key";
+      apiKeys: ApiKeyConfig;
     };
 
 /** Settings the storage and service layers read; enough for the stdio transport. */
@@ -269,8 +287,196 @@ function parseProjectAccess(projectAccess?: string, projectAccessFile?: string):
   const parsed = JSON.parse(jsonStr);
   return projectAccessMapSchema.parse(parsed);
 }
+
+const API_KEY_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const API_KEY_HEADER_RE = /^[A-Za-z0-9-]+$/;
+
+interface RawApiKeyEntry {
+  name: string;
+  permission: string;
+  secret: string;
+}
+
+function parseApiKeyEntry(entry: string): RawApiKeyEntry | null {
+  const firstColon = entry.indexOf(":");
+  if (firstColon === -1) return null;
+  const secondColon = entry.indexOf(":", firstColon + 1);
+  if (secondColon === -1) return null;
+  return {
+    name: entry.slice(0, firstColon),
+    permission: entry.slice(firstColon + 1, secondColon),
+    secret: entry.slice(secondColon + 1),
+  };
+}
+
+export function parseApiKeys(raw: string | undefined): ApiKey[] {
+  if (!raw || raw.trim() === "") return [];
+  const entries = raw
+    .split(",")
+    .map((e) => e.trim())
+    .filter((e) => e.length > 0);
+  const keys: ApiKey[] = [];
+  for (const entry of entries) {
+    const parsed = parseApiKeyEntry(entry);
+    if (!parsed) continue;
+    keys.push({
+      name: parsed.name,
+      permission: parsed.permission as ApiKeyPermission,
+      secret: parsed.secret,
+    });
+  }
+  return keys;
+}
+
+function refineApiKeys(
+  data: {
+    AUTH_MODE?: string | undefined;
+    API_KEYS?: string | undefined;
+    API_KEY_HEADER?: string | undefined;
+  },
+  ctx: z.RefinementCtx,
+): void {
+  if (data.API_KEY_HEADER !== undefined) {
+    const trimmed = data.API_KEY_HEADER.trim();
+    if (!API_KEY_HEADER_RE.test(trimmed)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEY_HEADER"],
+        message: "API_KEY_HEADER must match ^[A-Za-z0-9-]+$",
+      });
+    } else if (trimmed.toLowerCase() === "authorization") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEY_HEADER"],
+        message: 'API_KEY_HEADER must not be "authorization"',
+      });
+    }
+  }
+
+  if (data.AUTH_MODE === "none") {
+    if (data.API_KEYS !== undefined && data.API_KEYS.trim() !== "") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEYS"],
+        message: "API_KEYS has no effect when AUTH_MODE=none",
+      });
+    }
+    return;
+  }
+
+  const rawKeys = data.API_KEYS?.trim();
+  if (data.AUTH_MODE === "api_key" && (!rawKeys || rawKeys.length === 0)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["API_KEYS"],
+      message: "API_KEYS is required when AUTH_MODE=api_key",
+    });
+    return;
+  }
+
+  if (!rawKeys || rawKeys.length === 0) {
+    return;
+  }
+
+  const rawEntries = rawKeys
+    .split(",")
+    .map((e) => e.trim())
+    .filter((e) => e.length > 0);
+
+  if (data.AUTH_MODE === "api_key" && rawEntries.length === 0) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["API_KEYS"],
+      message: "API_KEYS is required when AUTH_MODE=api_key",
+    });
+    return;
+  }
+
+  const seenNames = new Set<string>();
+  const seenSecrets = new Set<string>();
+
+  let entryNum = 0;
+  for (const entry of rawEntries) {
+    entryNum++;
+    const parsed = parseApiKeyEntry(entry);
+
+    if (!parsed) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEYS"],
+        message: `entry ${entryNum} is malformed: must be <name>:<permission>:<secret>`,
+      });
+      continue;
+    }
+
+    const { name, permission, secret } = parsed;
+    const validName = API_KEY_NAME_RE.test(name);
+    const nameLabel = validName ? ` ("${name}")` : "";
+
+    if (!validName) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEYS"],
+        message: `entry ${entryNum} has an invalid name: must match ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`,
+      });
+    } else if (seenNames.has(name)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEYS"],
+        message: `duplicate API key name "${name}"`,
+      });
+    } else {
+      seenNames.add(name);
+    }
+
+    if (permission !== "read" && permission !== "write" && permission !== "admin") {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEYS"],
+        message: `entry ${entryNum}${nameLabel} has an invalid permission: must be read, write, or admin`,
+      });
+    }
+
+    if (secret.length < 32) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEYS"],
+        message: `entry ${entryNum}${nameLabel} secret must be at least 32 characters`,
+      });
+    }
+
+    if (/\s/.test(secret)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEYS"],
+        message: `entry ${entryNum}${nameLabel} secret must not contain whitespace`,
+      });
+    }
+
+    if (secret.includes(",")) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEYS"],
+        message: `entry ${entryNum}${nameLabel} secret must not contain commas`,
+      });
+    }
+
+    if (seenSecrets.has(secret)) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["API_KEYS"],
+        message: `duplicate API key secret for entry ${entryNum}${nameLabel}`,
+      });
+    } else {
+      seenSecrets.add(secret);
+    }
+  }
+}
+
 const httpEnvShape = {
-  AUTH_MODE: z.enum(["oidc", "none"], "AUTH_MODE must be oidc or none").default("oidc"),
+  AUTH_MODE: z.enum(["oidc", "none", "api_key"], "AUTH_MODE must be oidc, none, or api_key").default("oidc"),
+  API_KEYS: z.string().optional(),
+  API_KEY_HEADER: z.string().optional(),
   PORT: intEnv("PORT", "8080", 0, 65535),
   HOST: z.string().default("0.0.0.0"),
   PUBLIC_BASE_URL: z
@@ -348,6 +554,7 @@ const rawEnvSchema = z.object({ ...httpEnvShape, ...storageEnvShape }).superRefi
     if (!data || typeof data !== "object") return;
     refineGitCredentials(data, ctx);
     refineProjectAccess(data, ctx);
+    refineApiKeys(data, ctx);
     if (data.AUTH_MODE === "none") {
       const isLoopback = isLoopbackHost(data.HOST ?? "0.0.0.0");
       const allowUnauthenticated = data.ALLOW_UNAUTHENTICATED_NETWORK === "true";
@@ -479,9 +686,20 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const trustProxy = parseTrustProxy(raw.TRUST_PROXY);
   const allowUnauthenticatedNetwork = raw.ALLOW_UNAUTHENTICATED_NETWORK === "true";
 
+  const apiKeyHeader =
+    raw.API_KEY_HEADER && raw.API_KEY_HEADER.trim().length > 0 ? raw.API_KEY_HEADER.trim().toLowerCase() : "x-api-key";
+
   let auth: AuthConfig;
   if (raw.AUTH_MODE === "none") {
     auth = { mode: "none" };
+  } else if (raw.AUTH_MODE === "api_key") {
+    auth = {
+      mode: "api_key",
+      apiKeys: {
+        header: apiKeyHeader,
+        keys: parseApiKeys(raw.API_KEYS),
+      },
+    };
   } else {
     if (raw.OAUTH_ISSUER === undefined) {
       throw new Error("OAUTH_ISSUER is required when AUTH_MODE is oidc");
@@ -522,6 +740,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       allowInsecureIssuer,
       access,
       ...(uiClientId ? { uiClientId } : {}),
+      apiKeys: {
+        header: apiKeyHeader,
+        keys: parseApiKeys(raw.API_KEYS),
+      },
     };
   }
 

@@ -9,6 +9,7 @@ import {
 } from "@modelcontextprotocol/server";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { ZodError } from "zod";
+import { createApiKeyAuthenticator } from "./auth/api-key.js";
 import { type DiscoveredAuthorizationServer, discoverAuthorizationServer } from "./auth/discovery.js";
 import { createAuthenticator } from "./auth/http-auth.js";
 import { JwtTokenVerifier, principalFromAuthInfo } from "./auth/verifier.js";
@@ -35,6 +36,10 @@ type AuthHandler =
       mode: "oidc";
       authenticate(req: FastifyRequest): Promise<Response | null>;
       insufficientScope(scopeName: string): Response;
+    }
+  | {
+      mode: "api_key";
+      authenticate(req: FastifyRequest): Promise<Response | null>;
     }
   | {
       mode: "none";
@@ -92,7 +97,7 @@ export interface StartServerOptions {
 
 export async function startServer(config: Config, options: StartServerOptions = {}): Promise<RunningServer> {
   if (options.hostEndpoint && config.auth.mode !== "none") {
-    throw new Error("Cannot enable hostEndpoint with auth mode oidc");
+    throw new Error(`Cannot enable hostEndpoint with auth mode ${config.auth.mode}`);
   }
   const tp = config.trustProxy;
   const trustProxy =
@@ -104,8 +109,13 @@ export async function startServer(config: Config, options: StartServerOptions = 
             .map((s) => s.trim())
             .filter((s) => s.length > 0)
         : tp;
+  const redactPaths = ["req.headers.authorization"];
+  if (config.auth.mode === "api_key" || config.auth.mode === "oidc") {
+    const keyHeader = config.auth.apiKeys.header.toLowerCase();
+    redactPaths.push(`req.headers["${keyHeader}"]`);
+  }
   const app = Fastify({
-    logger: { level: config.logLevel, redact: ["req.headers.authorization"] },
+    logger: { level: config.logLevel, redact: redactPaths },
     trustProxy,
     requestTimeout: 120_000,
     connectionTimeout: 120_000,
@@ -187,9 +197,36 @@ export async function startServer(config: Config, options: StartServerOptions = 
       scopeNames: config.scopeNames,
     });
 
+    if (config.auth.apiKeys.keys.length > 0) {
+      app.log.info(
+        {
+          keys: config.auth.apiKeys.keys.map((k) => ({ name: k.name, permission: k.permission })),
+        },
+        "configured API keys",
+      );
+    }
+
+    const apiKeyAuth = createApiKeyAuthenticator({
+      header: config.auth.apiKeys.header,
+      keys: config.auth.apiKeys.keys,
+      scopeNames: config.scopeNames,
+    });
+
     authHandler = {
       mode: "oidc",
       authenticate: async (req) => {
+        const keyResult = apiKeyAuth(req.headers);
+        if (keyResult.status === "matched") {
+          req.principal = keyResult.principal;
+          req.authInfo = keyResult.authInfo;
+          return null;
+        }
+        if (keyResult.status === "invalid" && keyResult.source === "header") {
+          return Response.json(
+            { error: { code: "unauthorized", message: "missing or invalid API key" } },
+            { status: 401 },
+          );
+        }
         const result = await authenticator.authenticate(req.headers.authorization);
         if (!result.ok) return result.response;
         req.principal = result.principal;
@@ -197,6 +234,33 @@ export async function startServer(config: Config, options: StartServerOptions = 
         return null;
       },
       insufficientScope: (scopeName) => authenticator.insufficientScope(scopeName),
+    };
+  } else if (config.auth.mode === "api_key") {
+    app.log.info(
+      {
+        keys: config.auth.apiKeys.keys.map((k) => ({ name: k.name, permission: k.permission })),
+      },
+      "configured API keys",
+    );
+    const apiKeyAuth = createApiKeyAuthenticator({
+      header: config.auth.apiKeys.header,
+      keys: config.auth.apiKeys.keys,
+      scopeNames: config.scopeNames,
+    });
+    authHandler = {
+      mode: "api_key",
+      authenticate: async (req) => {
+        const result = apiKeyAuth(req.headers);
+        if (result.status === "matched") {
+          req.principal = result.principal;
+          req.authInfo = result.authInfo;
+          return null;
+        }
+        return Response.json(
+          { error: { code: "unauthorized", message: "missing or invalid API key" } },
+          { status: 401 },
+        );
+      },
     };
   } else {
     app.log.warn("authentication disabled, every request has admin access; never expose this beyond localhost");
@@ -335,11 +399,21 @@ export async function startServer(config: Config, options: StartServerOptions = 
     secured.addHook("onRequest", async (req, reply) => {
       const challenge = await authHandler.authenticate(req);
       if (challenge) return reply.send(challenge);
-      if (authHandler.mode === "oidc") {
+      if (authHandler.mode === "oidc" || authHandler.mode === "api_key") {
         const need = req.routeOptions?.config?.permission ?? "read";
         const p = req.principal;
         const permitted = p !== null && (need === "admin" ? p.canAdmin : need === "write" ? p.canWrite : p.canRead);
-        if (!permitted) return reply.send(authHandler.insufficientScope(config.scopeNames[need]));
+        if (!permitted) {
+          if (authHandler.mode === "oidc") {
+            return reply.send(authHandler.insufficientScope(config.scopeNames[need]));
+          }
+          return reply.code(403).send({
+            error: {
+              code: "forbidden",
+              message: `requires ${config.scopeNames[need]}`,
+            },
+          });
+        }
       }
     });
     registerMcpRoute(secured, (request, options) => mcpHandler.fetch(request, options), config.publicBaseUrl);

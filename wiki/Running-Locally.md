@@ -80,7 +80,7 @@ ok-fine from (compared case-insensitively); with no email configured, `human:` a
 
 `ok-fine serve` runs the same server as the container image (MCP and the
 [REST API](https://github.com/ferrule-io/ok-fine/wiki/REST-API)), defaulting to `127.0.0.1:8080` and
-`PUBLIC_BASE_URL=http://localhost:<port>`. Without `--no-auth` it requires `OAUTH_ISSUER`, as described in
+`PUBLIC_BASE_URL=http://localhost:<port>`. Without `--no-auth` or `AUTH_MODE=api_key` it requires `OAUTH_ISSUER`, as described in
 [Authentication and authorization](https://github.com/ferrule-io/ok-fine/wiki/Authentication-and-Authorization).
 
 > **Warning:** `--no-auth` (`AUTH_MODE=none`) disables authentication completely and gives every caller full admin
@@ -89,6 +89,19 @@ ok-fine from (compared case-insensitively); with no email configured, `human:` a
 The read-only web UI is at `http://localhost:<port>/ui/`.
 
 # HTTP with Docker
+
+To run the container locally with static API key authentication:
+
+```sh
+docker run --rm -p 8080:8080 \
+  -e AUTH_MODE=api_key \
+  -e API_KEYS="local:admin:$(openssl rand -hex 32)" \
+  -e PUBLIC_BASE_URL=http://localhost:8080 \
+  -v okf-data:/data \
+  ghcr.io/ferrule-io/ok-fine:latest
+```
+
+Clients authenticate by passing the generated key via the `X-API-Key: <secret>` header or `Authorization: Bearer <secret>`.
 
 To run the container locally with authentication disabled behind a loopback port mapping, set `ALLOW_UNAUTHENTICATED_NETWORK=true` (since the container listens on `0.0.0.0`):
 

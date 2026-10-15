@@ -8,7 +8,7 @@ export function NotConfiguredPage() {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const redirectUri = state.status === "unconfigured" ? state.redirectUri : `${origin}/ui/callback`;
   const scope = "config" in state ? state.config.scope : "okf:read";
-  const resource = "discovery" in state ? state.discovery.resource : `${origin}/mcp`;
+  const resource = ("discovery" in state ? state.discovery?.resource : undefined) ?? `${origin}/mcp`;
 
   return (
     <Page title="Sign-in not configured" className="min-h-screen flex items-center justify-center p-6 bg-bg">

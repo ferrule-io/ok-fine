@@ -24,7 +24,7 @@ export type AuthState =
   | {
       status: "signed-out";
       config: UiClientConfig;
-      discovery: AuthDiscovery;
+      discovery?: AuthDiscovery;
       reason: "initial" | "expired" | "signed-out";
       error?: string;
     }
@@ -37,13 +37,13 @@ export type AuthState =
   | {
       status: "forbidden";
       config: UiClientConfig;
-      discovery: AuthDiscovery;
+      discovery?: AuthDiscovery;
       scope: string;
     }
   | {
       status: "signed-in";
       config: UiClientConfig;
-      discovery: AuthDiscovery;
+      discovery?: AuthDiscovery;
       token: StoredToken;
       identity: string | null;
     }
@@ -54,6 +54,7 @@ export interface AuthContextValue {
   login(returnTo: string): Promise<void>;
   completeLogin(url: URL): Promise<string>;
   logout(): void;
+  signInWithApiKey(apiKey: string): Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -79,6 +80,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
 
+        if (config.authMode === "api_key") {
+          const storedKey = window.sessionStorage.getItem("okf.apiKey");
+          if (storedKey) {
+            try {
+              const res = await fetch("/api/v1/projects", {
+                headers: { authorization: `Bearer ${storedKey}` },
+              });
+              if (!active) return;
+              if (res.ok) {
+                setState({
+                  status: "signed-in",
+                  config,
+                  token: { accessToken: storedKey, expiresAt: null },
+                  identity: null,
+                });
+                return;
+              }
+              window.sessionStorage.removeItem("okf.apiKey");
+            } catch {
+              window.sessionStorage.removeItem("okf.apiKey");
+            }
+          }
+
+          if (!active) return;
+          setState({
+            status: "signed-out",
+            config,
+            reason: "initial",
+          });
+          return;
+        }
         const discovery = await discoverAuth(window.location.origin);
         if (!active) return;
 
@@ -156,27 +188,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         return null;
       },
+      authMode: () => {
+        const current = stateRef.current;
+        return "config" in current ? current.config.authMode : null;
+      },
       onUnauthorized: () => {
         window.sessionStorage.removeItem("okf.oauth.token");
         window.sessionStorage.removeItem("okf.oauth.pending");
+        window.sessionStorage.removeItem("okf.apiKey");
         queryClient.clear();
         const current = stateRef.current;
-        if ("config" in current && "discovery" in current) {
+        if ("config" in current) {
           setState({
             status: "signed-out",
             config: current.config,
-            discovery: current.discovery,
+            discovery: "discovery" in current ? current.discovery : undefined,
             reason: "expired",
           });
         }
       },
       onForbidden: () => {
         const current = stateRef.current;
-        if ("config" in current && "discovery" in current) {
+        if ("config" in current) {
           setState({
             status: "forbidden",
             config: current.config,
-            discovery: current.discovery,
+            discovery: "discovery" in current ? current.discovery : undefined,
             scope: current.config.scope,
           });
         }
@@ -224,14 +261,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let config: UiClientConfig;
     let discovery: AuthDiscovery;
     const current = stateRef.current;
-    if ("config" in current && "discovery" in current) {
+    if ("config" in current && "discovery" in current && current.discovery) {
       config = current.config;
       discovery = current.discovery;
     } else {
       config = await getUiConfig();
+      if (config.authMode !== "oidc") {
+        return;
+      }
       discovery = await discoverAuth(window.location.origin);
     }
-
     const redirectUri = `${window.location.origin}/ui/callback`;
     const clientId = await resolveClientId(discovery, config, redirectUri, window.localStorage);
     const safeReturnTo = sanitizeReturnTo(returnTo, window.location.origin);
@@ -250,7 +289,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let config: UiClientConfig;
       let discovery: AuthDiscovery;
       const current = stateRef.current;
-      if ("config" in current && "discovery" in current) {
+      if ("config" in current && "discovery" in current && current.discovery) {
         config = current.config;
         discovery = current.discovery;
       } else {
@@ -332,23 +371,79 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     window.sessionStorage.removeItem("okf.oauth.token");
     window.sessionStorage.removeItem("okf.oauth.pending");
+    window.sessionStorage.removeItem("okf.apiKey");
     queryClient.clear();
     const current = stateRef.current;
-    if ("config" in current && "discovery" in current) {
+    if ("config" in current) {
       setState({
         status: "signed-out",
         config: current.config,
-        discovery: current.discovery,
+        discovery: "discovery" in current ? current.discovery : undefined,
         reason: "signed-out",
       });
     }
   }, [queryClient]);
+
+  const signInWithApiKey = useCallback(async (apiKey: string) => {
+    const trimmed = apiKey.trim();
+    if (!trimmed) {
+      throw new Error("API key is required");
+    }
+
+    const res = await fetch("/api/v1/projects", {
+      headers: {
+        authorization: `Bearer ${trimmed}`,
+      },
+    });
+
+    if (!res.ok) {
+      window.sessionStorage.removeItem("okf.apiKey");
+      if (res.status === 401) {
+        let msg = "Invalid API key";
+        try {
+          const body = (await res.json()) as { error?: { message?: string } };
+          if (body?.error?.message) {
+            msg = body.error.message;
+          }
+        } catch {}
+        throw new Error(msg);
+      }
+      let message = `Authentication failed (HTTP ${res.status})`;
+      try {
+        const body = (await res.json()) as { error?: { message?: string } };
+        if (body?.error?.message) {
+          message = body.error.message;
+        }
+      } catch {}
+      throw new Error(message);
+    }
+
+    window.sessionStorage.setItem("okf.apiKey", trimmed);
+    const current = stateRef.current;
+    let config: UiClientConfig;
+    if ("config" in current) {
+      config = current.config;
+    } else {
+      config = await getUiConfig();
+    }
+
+    setState({
+      status: "signed-in",
+      config,
+      token: {
+        accessToken: trimmed,
+        expiresAt: null,
+      },
+      identity: null,
+    });
+  }, []);
 
   const value: AuthContextValue = {
     state,
     login,
     completeLogin,
     logout,
+    signInWithApiKey,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

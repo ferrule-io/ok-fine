@@ -32,6 +32,8 @@ export function AuthGate() {
   }
 
   if (state.status === "signed-out") {
+    // Both api_key and oidc modes render through SignInPage, which presents
+    // either the API-key form or the IdP redirect button based on config.authMode.
     return <SignInPage error={state.error} />;
   }
 
