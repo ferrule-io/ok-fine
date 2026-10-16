@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useNavigate } from "react-router";
 import type { ConceptView } from "../../../src/service/knowledge-service.js";
 import { readConcept } from "../api/client.js";
@@ -23,9 +23,73 @@ interface PreviewState {
   targetEl: HTMLElement;
 }
 
+function useResolvedDark(): boolean {
+  return useSyncExternalStore(
+    (onStoreChange) => {
+      if (typeof document === "undefined") {
+        return () => {};
+      }
+      const observer =
+        typeof MutationObserver !== "undefined"
+          ? new MutationObserver(() => {
+              onStoreChange();
+            })
+          : null;
+
+      if (observer) {
+        observer.observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ["class"],
+        });
+      }
+
+      const mql =
+        typeof window !== "undefined" && window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
+
+      mql?.addEventListener("change", onStoreChange);
+
+      return () => {
+        observer?.disconnect();
+        mql?.removeEventListener("change", onStoreChange);
+      };
+    },
+    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
+    () => false,
+  );
+}
+
+function createCopyButton(code: string): HTMLButtonElement {
+  const copyBtn = document.createElement("button");
+  copyBtn.type = "button";
+  copyBtn.setAttribute("aria-label", "Copy code");
+  copyBtn.title = "Copy code";
+  copyBtn.className =
+    "absolute top-2.5 right-2.5 z-10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity inline-flex items-center gap-1 rounded-md border border-border bg-surface/80 px-2 py-1 text-xs font-medium text-muted backdrop-blur-xs hover:bg-surface-2 hover:text-fg focus-visible:outline-2 outline-accent-500 cursor-pointer select-none";
+  copyBtn.innerHTML =
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+
+  copyBtn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(code);
+      copyBtn.innerHTML =
+        '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500 shrink-0"><polyline points="20 6 9 17 4 12"/></svg>';
+      setTimeout(() => {
+        copyBtn.innerHTML =
+          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
+      }, 1500);
+    } catch {
+      // Ignore clipboard errors
+    }
+  });
+
+  return copyBtn;
+}
+
 export function Markdown({ project, concept, onHeadings, onCitations, className }: MarkdownProps) {
   const navigate = useNavigate();
   const containerRef = useRef<HTMLDivElement>(null);
+  const isDark = useResolvedDark();
 
   const [previewState, setPreviewState] = useState<PreviewState | null>(null);
   const hoverTimerRef = useRef<number | undefined>(undefined);
@@ -46,8 +110,8 @@ export function Markdown({ project, concept, onHeadings, onCitations, className 
     onCitations?.(rendered.citations);
   }, [rendered, onHeadings, onCitations]);
 
-  // Code block syntax highlighting & copy button injection
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run highlighting when rendered HTML changes
+  // Code block syntax highlighting, mermaid diagram rendering & copy button injection
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run highlighting when rendered HTML or resolved theme changes
   useEffect(() => {
     const container = containerRef.current;
     if (!container) {
@@ -56,16 +120,88 @@ export function Markdown({ project, concept, onHeadings, onCitations, className 
 
     let cancelled = false;
 
-    const highlightAndInject = async () => {
-      const preElements = Array.from(container.querySelectorAll<HTMLPreElement>("pre.okf-code"));
+    const processBlocks = async () => {
+      const resolvedDark =
+        typeof document !== "undefined" ? document.documentElement.classList.contains("dark") : isDark;
+      const targetTheme = resolvedDark ? "dark" : "light";
+
+      // 1. Re-render any existing diagram wrappers if theme changed
+      const existingDiagrams = Array.from(
+        container.querySelectorAll<HTMLDivElement>("div[data-okf-diagram='mermaid']"),
+      );
+
+      const diagramsToUpdate = existingDiagrams.filter(
+        (wrapper) => wrapper.getAttribute("data-rendered-theme") !== targetTheme,
+      );
+
+      if (diagramsToUpdate.length > 0) {
+        // Dynamic import required so mermaid remains in a separate lazy chunk
+        const { renderMermaid } = await import("../lib/diagram.js");
+        if (cancelled) {
+          return;
+        }
+
+        for (const wrapper of diagramsToUpdate) {
+          if (cancelled) {
+            break;
+          }
+          const code = wrapper.getAttribute("data-mermaid-source");
+          if (!code) {
+            continue;
+          }
+
+          const svg = await renderMermaid(code, resolvedDark);
+          if (cancelled) {
+            break;
+          }
+
+          if (svg) {
+            const content = wrapper.querySelector<HTMLDivElement>(".okf-diagram-content");
+            if (content) {
+              content.innerHTML = svg;
+              wrapper.setAttribute("data-rendered-theme", targetTheme);
+            }
+          }
+        }
+      }
+
+      // 2. Process any unprocessed <pre class="okf-code">
+      const preElements = Array.from(container.querySelectorAll<HTMLPreElement>("pre.okf-code")).filter(
+        (pre) => pre.getAttribute("data-okf-processed") !== "true",
+      );
+
       if (preElements.length === 0) {
         return;
       }
 
-      // Dynamic import required by plan/contract so Shiki remains in a separate lazy chunk
-      const { highlight } = await import("../lib/highlight.js");
-      if (cancelled) {
-        return;
+      const hasMermaid = preElements.some((pre) => {
+        const lang = (pre.getAttribute("data-lang") ?? "").trim().toLowerCase();
+        return lang === "mermaid";
+      });
+
+      const hasNonMermaid = preElements.some((pre) => {
+        const lang = (pre.getAttribute("data-lang") ?? "").trim().toLowerCase();
+        return lang !== "mermaid" && lang !== "";
+      });
+
+      // Dynamic import required so Shiki remains in a separate lazy chunk and only loads when needed
+      let highlightFn: ((code: string, lang: string) => Promise<string | null>) | null = null;
+      if (hasNonMermaid) {
+        const { highlight } = await import("../lib/highlight.js");
+        if (cancelled) {
+          return;
+        }
+        highlightFn = highlight;
+      }
+
+      // Dynamic import required so mermaid remains in a separate lazy chunk and only loads when needed
+      let renderMermaidFn: ((code: string, dark: boolean) => Promise<string | null>) | null = null;
+      if (hasMermaid) {
+        const { renderMermaid } = await import("../lib/diagram.js");
+        if (cancelled) {
+          return;
+        }
+        renderMermaidFn = renderMermaid;
       }
 
       for (const pre of preElements) {
@@ -77,14 +213,47 @@ export function Markdown({ project, concept, onHeadings, onCitations, className 
         }
         pre.setAttribute("data-okf-processed", "true");
 
-        const lang = pre.getAttribute("data-lang") ?? "";
+        const lang = (pre.getAttribute("data-lang") ?? "").trim();
+        const normalizedLang = lang.toLowerCase();
         const codeEl = pre.querySelector("code");
         const code = codeEl?.textContent ?? pre.textContent ?? "";
 
-        let highlightedHtml: string | null = null;
-        if (lang) {
+        if (normalizedLang === "mermaid" && renderMermaidFn) {
+          let svg: string | null = null;
           try {
-            highlightedHtml = await highlight(code, lang);
+            svg = await renderMermaidFn(code, resolvedDark);
+          } catch {
+            svg = null;
+          }
+
+          if (cancelled) {
+            break;
+          }
+
+          if (svg) {
+            const wrapper = document.createElement("div");
+            wrapper.className =
+              "relative group not-prose my-4 okf-diagram rounded-xl border border-border bg-surface-2 p-4";
+            wrapper.setAttribute("data-okf-diagram", "mermaid");
+            wrapper.setAttribute("data-mermaid-source", code);
+            wrapper.setAttribute("data-rendered-theme", targetTheme);
+
+            const content = document.createElement("div");
+            content.className = "okf-diagram-content overflow-x-auto flex justify-center";
+            content.innerHTML = svg;
+
+            wrapper.appendChild(content);
+            wrapper.appendChild(createCopyButton(code));
+            pre.parentNode?.replaceChild(wrapper, pre);
+            continue;
+          }
+          // On failure (null) fall through to plain code wrapper path
+        }
+
+        let highlightedHtml: string | null = null;
+        if (highlightFn && lang && normalizedLang !== "mermaid") {
+          try {
+            highlightedHtml = await highlightFn(code, lang);
           } catch {
             // Leave as plain pre on failure
           }
@@ -108,41 +277,17 @@ export function Markdown({ project, concept, onHeadings, onCitations, className 
           wrapper.appendChild(clone);
         }
 
-        const copyBtn = document.createElement("button");
-        copyBtn.type = "button";
-        copyBtn.setAttribute("aria-label", "Copy code");
-        copyBtn.title = "Copy code";
-        copyBtn.className =
-          "absolute top-2.5 right-2.5 z-10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity inline-flex items-center gap-1 rounded-md border border-border bg-surface/80 px-2 py-1 text-xs font-medium text-muted backdrop-blur-xs hover:bg-surface-2 hover:text-fg focus-visible:outline-2 outline-accent-500 cursor-pointer select-none";
-        copyBtn.innerHTML =
-          '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
-
-        copyBtn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          try {
-            await navigator.clipboard.writeText(code);
-            copyBtn.innerHTML =
-              '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-500 shrink-0"><polyline points="20 6 9 17 4 12"/></svg>';
-            setTimeout(() => {
-              copyBtn.innerHTML =
-                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="shrink-0"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>';
-            }, 1500);
-          } catch {
-            // Ignore clipboard errors
-          }
-        });
-
-        wrapper.appendChild(copyBtn);
+        wrapper.appendChild(createCopyButton(code));
         pre.parentNode?.replaceChild(wrapper, pre);
       }
     };
 
-    highlightAndInject();
+    processBlocks();
 
     return () => {
       cancelled = true;
     };
-  }, [rendered.html]);
+  }, [rendered.html, isDark]);
 
   // Delegated clicks
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {

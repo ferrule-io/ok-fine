@@ -97,7 +97,7 @@ export async function registerUiRoutes(app: FastifyInstance, options: UiRouteOpt
   const htmlCsp = [
     "default-src 'self'",
     "script-src 'self'",
-    // Shiki emits inline style attributes for code block syntax highlighting.
+    // Shiki emits inline style attributes for code highlighting; Mermaid diagrams carry an inline <style>.
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self' data:",

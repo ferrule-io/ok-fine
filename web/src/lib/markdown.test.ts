@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
+import { sanitizeDiagramSvg } from "./diagram.js";
 import { sanitizeHighlightedHtml } from "./highlight.js";
 import { type RenderContext, renderConceptMarkdown, sanitizeMarkdownHtml } from "./markdown.js";
 import { readSources } from "./sources.js";
@@ -188,5 +189,62 @@ describe("readSources security", () => {
     expect(s3).toBeDefined();
     expect(s3?.url).toBe("https://example.com/safe");
     expect(s3?.commit).toBe("abcdef123456");
+  });
+});
+
+describe("sanitizeDiagramSvg", () => {
+  it("preserves safe SVG elements, styles, markers, and text content", () => {
+    const safeSvg =
+      '<svg id="d1" class="mermaid" width="100%" height="100%"><style>.actor { stroke: #333; fill: #fff; }</style><defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#000"></path></marker></defs><g marker-end="url(#arrow)"><path d="M 10 10 L 50 50"></path><text x="10" y="20">Alice -&gt; Bob</text></g></svg>';
+    const sanitized = sanitizeDiagramSvg(safeSvg);
+    expect(sanitized).toContain("<svg");
+    expect(sanitized).toContain('id="d1"');
+    expect(sanitized).toContain('class="mermaid"');
+    expect(sanitized).toContain("<style>.actor { stroke: #333; fill: #fff; }</style>");
+    expect(sanitized).toContain('<marker id="arrow"');
+    expect(sanitized).toContain('marker-end="url(#arrow)"');
+    expect(sanitized).toContain('<path d="M 10 10 L 50 50">');
+    expect(sanitized).toContain("<text");
+    expect(sanitized).toContain("Alice -&gt; Bob");
+  });
+
+  it("strips script, foreignObject, use, and animation tags", () => {
+    const maliciousSvg =
+      '<svg><script>alert("xss")</script><foreignObject><body><iframe src="evil.html"></iframe></body></foreignObject><use href="#evil" xlink:href="#evil2"></use><animate attributeName="x" from="0" to="10"></animate><set attributeName="fill" to="red"></set><animateMotion path="M 0 0 L 10 10"></animateMotion><animateTransform type="rotate"></animateTransform><g><text>Safe</text></g></svg>';
+    const sanitized = sanitizeDiagramSvg(maliciousSvg);
+    expect(sanitized).not.toContain("<script");
+    expect(sanitized).not.toContain("alert");
+    expect(sanitized).not.toContain("<foreignObject");
+    expect(sanitized).not.toContain("<foreignobject");
+    expect(sanitized).not.toContain("<iframe");
+    expect(sanitized).not.toContain("<use");
+    expect(sanitized).not.toContain("<animate");
+    expect(sanitized).not.toContain("<set");
+    expect(sanitized).not.toContain("<animateMotion");
+    expect(sanitized).not.toContain("<animatemotion");
+    expect(sanitized).not.toContain("<animateTransform");
+    expect(sanitized).not.toContain("<animatetransform");
+    expect(sanitized).toContain("<text>Safe</text>");
+  });
+
+  it("strips event handler attributes and href / xlink:href to javascript: and external URLs", () => {
+    const exploitSvg =
+      '<svg onload="alert(1)"><g onclick="alert(2)"><text onmouseover="alert(3)">Target</text><a href="javascript:alert(4)" xlink:href="https://evil.com/leak"><image href="https://evil.com/img.png" xlink:href="javascript:alert(5)"></image></a></g></svg>';
+    const sanitized = sanitizeDiagramSvg(exploitSvg);
+    expect(sanitized).not.toContain("onload=");
+    expect(sanitized).not.toContain("onclick=");
+    expect(sanitized).not.toContain("onmouseover=");
+    expect(sanitized).not.toContain("alert");
+    expect(sanitized).not.toContain("href=");
+    expect(sanitized).not.toContain("xlink:href=");
+    expect(sanitized).not.toContain("<a");
+    expect(sanitized).toContain("Target");
+  });
+
+  it("returns an empty string when the input has no svg element", () => {
+    expect(sanitizeDiagramSvg("")).toBe("");
+    expect(sanitizeDiagramSvg("<p>Not a diagram</p>")).toBe("");
+    expect(sanitizeDiagramSvg("<script>alert(1)</script>")).toBe("");
+    expect(sanitizeDiagramSvg("plain text")).toBe("");
   });
 });
