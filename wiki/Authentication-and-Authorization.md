@@ -203,7 +203,7 @@ For exercising OIDC locally or running tests without an external provider, `src/
 
 Web UI routes (`/ui/`, `/`, `/ui/config.json`, assets, and error responses) send fixed, non-configurable security headers:
 
-- **CSP:** App shell uses `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' <IdP origins>; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` ('unsafe-inline' styles are for Shiki highlighting, `img-src` excludes remote images so they can't leak reader IPs, and `upgrade-insecure-requests` is added only when `PUBLIC_BASE_URL` is https).
+- **CSP:** App shell uses `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' <IdP origins>; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` ('unsafe-inline' styles are for Shiki highlighting and Mermaid diagrams, `img-src` excludes remote images so they can't leak reader IPs, and `upgrade-insecure-requests` is added only when `PUBLIC_BASE_URL` is https).
 - **SVG responses:** Sandboxed CSP `default-src 'none'; style-src 'unsafe-inline'; sandbox`.
 - **Framing:** `frame-ancestors 'none'` and `X-Frame-Options: DENY`.
 - **MIME:** `X-Content-Type-Options: nosniff`.
@@ -212,7 +212,7 @@ Web UI routes (`/ui/`, `/`, `/ui/config.json`, assets, and error responses) send
 - **Permissions-Policy:** `camera=(), display-capture=(), geolocation=(), microphone=()`.
 - **Caching:** `index.html` is `no-cache`, `config.json` is `no-store`, and `assets/*` are immutable (`public, max-age=31536000, immutable`).
 
-In `AUTH_MODE=none` the Host/Origin check also covers `/ui` (foreign Host gets 403). Rendered Markdown blocks remote images (shown as a link instead) and only allows http(s)/mailto/tel external links.
+In `AUTH_MODE=none` the Host/Origin check also covers `/ui` (foreign Host gets 403). Rendered Markdown blocks remote images (shown as a link instead) and only allows http(s)/mailto/tel external links. ` ```mermaid ` blocks render as diagrams with Mermaid's `strict` security level and HTML labels off; directives cannot change the theme CSS, and the SVG is re-sanitized (no `script`, `foreignObject`, `use`, animation, or links) before injection.
 
 # Public deployment checklist
 
