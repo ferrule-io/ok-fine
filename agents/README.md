@@ -18,7 +18,7 @@ full lifecycle and identity-provider requirements.
 
 ### Local (no server)
 
-Each harness starts ok-fine itself from npm (Node.js 24+ and git required); knowledge lives in `~/.ok-fine`. Install
+Each harness starts ok-fine itself from npm (Node.js 24.22.1+ or 26.12.1+, and git required); knowledge lives in `~/.ok-fine`. Install
 the package as in the shared-server table below, skip the login, and add the server:
 
 | Harness | Add server |

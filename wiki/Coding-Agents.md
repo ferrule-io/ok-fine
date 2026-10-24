@@ -59,7 +59,7 @@ several repositories) for monorepo splits and multi-repo products.
 
 Without a shared server, each harness starts ok-fine itself from npm
 ([Running locally](https://github.com/ferrule-io/ok-fine/wiki/Running-Locally)); knowledge lives in `~/.ok-fine`.
-Requires Node.js 24+ and git.
+Requires Node.js 24.22.1+ (or 26.12.1+) and git.
 
 | Harness | Add server |
 |---|---|

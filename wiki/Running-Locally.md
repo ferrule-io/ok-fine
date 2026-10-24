@@ -4,7 +4,7 @@ over HTTP (`ok-fine serve`) for the web UI, REST API, and HTTP MCP clients.
 
 # Requirements
 
-- Node.js 24 or newer, and `git`.
+- Node.js 24.22.1 or newer (on 26.x, 26.12.1 or newer), and `git`.
 - macOS or Linux. On Windows, use WSL.
 
 # Stdio for agent sessions
