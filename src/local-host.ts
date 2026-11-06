@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, rm } from "node:fs/promises";
+import { chmod, link, lstat, rename, rm } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -43,6 +43,52 @@ export interface CreateLocalHostOptions {
   service: KnowledgeService;
   config: StorageConfig;
   log: Logger;
+  watchdogIntervalMs?: number;
+}
+
+function probeEndpoint(endpointPath: string): Promise<"listening" | "stale_or_missing"> {
+  const { promise, resolve, reject } = Promise.withResolvers<"listening" | "stale_or_missing">();
+  const socket = new net.Socket();
+  let settled = false;
+
+  const timer = setTimeout(() => {
+    finish(() => {
+      reject(new Error(`timed out probing ${endpointPath}`));
+    });
+  }, 2000);
+  timer.unref();
+
+  const finish = (action: () => void) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    socket.removeAllListeners();
+    socket.on("error", () => {});
+    socket.destroy();
+    action();
+  };
+
+  socket.once("connect", () => {
+    finish(() => resolve("listening"));
+  });
+
+  socket.once("error", (err: NodeJS.ErrnoException) => {
+    finish(() => {
+      if (
+        err.code === "ECONNREFUSED" ||
+        err.code === "ENOENT" ||
+        err.code === "ECONNRESET" ||
+        err.code === "ECONNABORTED"
+      ) {
+        resolve("stale_or_missing");
+      } else {
+        reject(err);
+      }
+    });
+  });
+
+  socket.connect(endpointPath);
+  return promise;
 }
 
 /**
@@ -55,6 +101,10 @@ export async function createLocalHost(options: CreateLocalHostOptions): Promise<
   const endpointPath = localEndpointPath(config.dataDir);
 
   if (process.platform !== "win32") {
+    const probe = await probeEndpoint(endpointPath);
+    if (probe === "listening") {
+      throw new Error(`another ok-fine host is already listening on ${endpointPath}`);
+    }
     try {
       await rm(endpointPath, { force: true });
     } catch {
@@ -67,7 +117,7 @@ export async function createLocalHost(options: CreateLocalHostOptions): Promise<
     handle?: { close(): Promise<void> };
   }>();
 
-  const server = net.createServer((socket) => {
+  const handleConnection = (socket: net.Socket) => {
     socket.on("error", (err) => log.debug({ err }, "local host client socket error"));
 
     const connRecord: {
@@ -139,7 +189,11 @@ export async function createLocalHost(options: CreateLocalHostOptions): Promise<
     };
 
     socket.on("data", onData);
-  });
+  };
+  const servers = new Set<net.Server>();
+
+  const server = net.createServer(handleConnection);
+  server.on("error", (err) => log.debug({ err }, "local host server error"));
 
   const { promise: listenPromise, resolve: resolveListen, reject: rejectListen } = Promise.withResolvers<void>();
   server.once("error", rejectListen);
@@ -157,17 +211,192 @@ export async function createLocalHost(options: CreateLocalHostOptions): Promise<
     }
   }
 
+  servers.add(server);
+  server.on("close", () => {
+    servers.delete(server);
+  });
+
+  let currentIdentity: { dev: number; ino: number } | undefined;
+  if (process.platform !== "win32") {
+    try {
+      const s = await lstat(endpointPath);
+      currentIdentity = { dev: s.dev, ino: s.ino };
+    } catch (err) {
+      log.warn({ err }, "failed to stat local host endpoint");
+    }
+  }
+
+  let closed = false;
+  let warnedDifferentIno = false;
+  let checkInFlight = false;
+  let inFlightPromise: Promise<void> | undefined;
+
+  const rebind = async (): Promise<void> => {
+    if (closed) return;
+    const newServer = net.createServer(handleConnection);
+    newServer.on("error", (err) => log.debug({ err }, "local host re-bound server error"));
+
+    const {
+      promise: rebindListenPromise,
+      resolve: resolveRebindListen,
+      reject: rejectRebindListen,
+    } = Promise.withResolvers<void>();
+    newServer.once("error", rejectRebindListen);
+    newServer.listen(endpointPath, () => {
+      newServer.off("error", rejectRebindListen);
+      resolveRebindListen();
+    });
+
+    try {
+      await rebindListenPromise;
+    } catch (err) {
+      log.warn({ err, endpointPath }, "failed to rebind local host endpoint");
+      try {
+        newServer.close();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    if (closed) {
+      try {
+        newServer.close();
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    servers.add(newServer);
+    newServer.on("close", () => {
+      servers.delete(newServer);
+    });
+
+    try {
+      await chmod(endpointPath, 0o600);
+    } catch {
+      // safe ignore
+    }
+
+    try {
+      const s = await lstat(endpointPath);
+      currentIdentity = { dev: s.dev, ino: s.ino };
+      warnedDifferentIno = false;
+    } catch (err) {
+      log.warn({ err }, "failed to stat re-bound local host endpoint");
+    }
+
+    log.warn({ endpointPath }, "re-bound local host endpoint after missing socket file");
+  };
+
+  const checkEndpoint = async (): Promise<void> => {
+    if (closed) return;
+    try {
+      const s = await lstat(endpointPath);
+      if (!currentIdentity) {
+        currentIdentity = { dev: s.dev, ino: s.ino };
+      } else if (s.dev !== currentIdentity.dev || s.ino !== currentIdentity.ino) {
+        if (!warnedDifferentIno) {
+          warnedDifferentIno = true;
+          log.warn(
+            { endpointPath, expected: currentIdentity, actual: { dev: s.dev, ino: s.ino } },
+            `another ok-fine host or process replaced ${endpointPath}`,
+          );
+        }
+      } else {
+        warnedDifferentIno = false;
+      }
+    } catch (err: unknown) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") {
+        if (closed) return;
+        await rebind();
+      } else {
+        log.debug({ err }, "local host watchdog stat error");
+      }
+    }
+  };
+
+  const runCheck = async (): Promise<void> => {
+    if (closed || checkInFlight) return;
+    checkInFlight = true;
+    const p = checkEndpoint();
+    inFlightPromise = p;
+    try {
+      await p;
+    } catch (err) {
+      log.warn({ err }, "local host watchdog check failed");
+    } finally {
+      checkInFlight = false;
+      if (inFlightPromise === p) {
+        inFlightPromise = undefined;
+      }
+    }
+  };
+
+  let watchdogTimer: NodeJS.Timeout | undefined;
+  if (process.platform !== "win32") {
+    const intervalMs = options.watchdogIntervalMs ?? 2000;
+    if (intervalMs > 0) {
+      watchdogTimer = setInterval(() => {
+        void runCheck();
+      }, intervalMs);
+      watchdogTimer.unref();
+    }
+  }
+
   let closing: Promise<void> | undefined;
   return {
     endpointPath,
     close: () => {
       closing ??= (async () => {
-        const { promise: closePromise, resolve: resolveClose } = Promise.withResolvers<void>();
-        try {
-          server.close(() => resolveClose());
-        } catch {
-          resolveClose();
+        closed = true;
+        if (watchdogTimer) {
+          clearInterval(watchdogTimer);
+          watchdogTimer = undefined;
         }
+        if (inFlightPromise) {
+          try {
+            await inFlightPromise;
+          } catch {
+            // ignore
+          }
+        }
+        let preservedReplacementPath: string | undefined;
+        if (process.platform !== "win32" && currentIdentity) {
+          try {
+            const s = await lstat(endpointPath);
+            if (s.dev !== currentIdentity.dev || s.ino !== currentIdentity.ino) {
+              const tmpBak = `${endpointPath}.preserve-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+              try {
+                await link(endpointPath, tmpBak);
+                preservedReplacementPath = tmpBak;
+              } catch {
+                try {
+                  await rename(endpointPath, tmpBak);
+                  preservedReplacementPath = tmpBak;
+                } catch {
+                  // ignore
+                }
+              }
+            }
+          } catch {
+            // ignore
+          }
+        }
+
+        const serverClosePromises = Array.from(servers).map((s) => {
+          const { promise: p, resolve: res } = Promise.withResolvers<void>();
+          try {
+            s.close(() => res());
+          } catch {
+            res();
+          }
+          return p;
+        });
+        servers.clear();
+
         const closePromises: Promise<void>[] = [];
         for (const conn of connections) {
           if (conn.handle) {
@@ -176,13 +405,26 @@ export async function createLocalHost(options: CreateLocalHostOptions): Promise<
           conn.socket.destroy();
         }
         connections.clear();
+
         await Promise.all(closePromises);
-        await closePromise;
-        if (process.platform !== "win32") {
+        await Promise.all(serverClosePromises);
+        if (preservedReplacementPath) {
           try {
-            await rm(endpointPath, { force: true });
+            await rename(preservedReplacementPath, endpointPath);
           } catch {
             // ignore
+          }
+        } else if (process.platform !== "win32" && currentIdentity) {
+          try {
+            const s = await lstat(endpointPath);
+            if (s.dev === currentIdentity.dev && s.ino === currentIdentity.ino) {
+              await rm(endpointPath, { force: true });
+            }
+          } catch (err: unknown) {
+            const code = (err as NodeJS.ErrnoException).code;
+            if (code !== "ENOENT") {
+              log.debug({ err }, "failed to stat endpoint on close");
+            }
           }
         }
       })();

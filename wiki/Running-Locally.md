@@ -67,7 +67,7 @@ The first session to start takes the exclusive lock (`~/.ok-fine/ok-fine.lock`, 
 
 `ok-fine serve` remains for the read-only web UI, the REST API, and HTTP MCP clients. When `ok-fine serve --no-auth` is running, stdio sessions automatically attach to it through the same local socket; with OIDC authentication `serve` does not open the socket, so stdio sessions cannot bypass it. `ok-fine serve` cannot start while a stdio session is hosting that data directory (close the stdio sessions or specify a different `--data-dir`).
 
-A lock left by an exited or crashed process is taken over automatically; if `serve` reports a lock held by a live process that is not ok-fine, delete the lock file.
+A lock left by an exited or crashed process is taken over automatically, and when several sessions race to take it over only one becomes the host. If the host's socket file disappears, the host recreates it. If `serve` reports a lock held by a live process that is not ok-fine, delete the lock file. If new sessions time out with a message that the lock holder does not accept connections, stop the process named in the lock file (an older ok-fine host whose socket was removed); the next session then takes over.
 
 # Identity and actors
 

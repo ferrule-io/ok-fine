@@ -1,4 +1,5 @@
 import net from "node:net";
+import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
@@ -108,6 +109,7 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
   let onReplayResponse: (() => void) | null = null;
 
   async function runElection(deadline: number): Promise<net.Socket> {
+    let unreachableHolder: number | null = null;
     while (Date.now() < deadline && !shuttingDown) {
       const lockRes = await tryLockDataDir(config.dataDir);
       if (lockRes.acquired) {
@@ -128,14 +130,25 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
       }
 
       const holderPid = lockRes.holderPid;
+      unreachableHolder = null;
       if (holderPid !== null && isProcessAlive(holderPid)) {
+        const socket = await tryConnectSocket(endpoint);
+        if (socket) return socket;
+        unreachableHolder = holderPid;
+      } else if (holderPid === null) {
+        // Lock acquisition encountered contention or in-flight write.
+        // A host may already be listening on the endpoint; probe before backing off.
         const socket = await tryConnectSocket(endpoint);
         if (socket) return socket;
       }
       await sleep(50);
     }
     const timeoutStr = timeoutMs % 1000 === 0 ? `${timeoutMs / 1000}s` : `${timeoutMs}ms`;
-    throw new Error(`Timed out waiting for ok-fine host on ${config.dataDir} after ${timeoutStr}`);
+    const hint =
+      unreachableHolder === null
+        ? ""
+        : `: pid ${unreachableHolder} holds ${join(config.dataDir, "ok-fine.lock")} but does not accept connections on ${endpoint}; if it is a stuck ok-fine process, stop it`;
+    throw new Error(`Timed out waiting for ok-fine host on ${config.dataDir} after ${timeoutStr}${hint}`);
   }
 
   function handleStdinLine(line: string): void {
@@ -224,7 +237,6 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
 
     try {
       await teardownActive();
-
       // Answer every in-flight request with host restart error
       for (const id of inFlightRequests.values()) {
         const errorResponse = {
@@ -309,7 +321,6 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
           await sleep(50);
         }
       }
-
       if (!connectedSocket && !shuttingDown) {
         const timeoutStr = timeoutMs % 1000 === 0 ? `${timeoutMs / 1000}s` : `${timeoutMs}ms`;
         throw new Error(`Timed out waiting for ok-fine host on ${config.dataDir} after ${timeoutStr}`);

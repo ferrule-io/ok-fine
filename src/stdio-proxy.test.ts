@@ -7,7 +7,7 @@ import { Client } from "@modelcontextprotocol/client";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig, loadStorageConfig } from "./config.js";
-import { tryLockDataDir } from "./data-dir-lock.js";
+import { lockDataDir, tryLockDataDir } from "./data-dir-lock.js";
 import { localEndpointPath } from "./local-host.js";
 import { startLocalHost, startServer } from "./server.js";
 import { type RunningStdioProxy, startStdioProxy } from "./stdio-proxy.js";
@@ -293,30 +293,35 @@ describe("stdio proxy and shared sessions", () => {
       AUTH_MODE: "none",
     });
 
-    const runningHttpServer = await startServer(serverConfig, { hostEndpoint: true });
+    const release = await lockDataDir(dataDir);
+    try {
+      const runningHttpServer = await startServer(serverConfig, { hostEndpoint: true });
 
-    // Connect stdio proxy to the data dir being served by HTTP server
-    const clientIn = new PassThrough();
-    const clientOut = new PassThrough();
-    const proxy = await startStdioProxy({
-      config: loadStorageConfig({ DATA_DIR: dataDir, LOG_LEVEL: "silent" }),
-      identity: "dev@example.com",
-      log: silent,
-      stdin: clientIn,
-      stdout: clientOut,
-      startHost: () => startLocalHost(loadStorageConfig({ DATA_DIR: dataDir, LOG_LEVEL: "silent" }), { log: silent }),
-    });
+      // Connect stdio proxy to the data dir being served by HTTP server
+      const clientIn = new PassThrough();
+      const clientOut = new PassThrough();
+      const proxy = await startStdioProxy({
+        config: loadStorageConfig({ DATA_DIR: dataDir, LOG_LEVEL: "silent" }),
+        identity: "dev@example.com",
+        log: silent,
+        stdin: clientIn,
+        stdout: clientOut,
+        startHost: () => startLocalHost(loadStorageConfig({ DATA_DIR: dataDir, LOG_LEVEL: "silent" }), { log: silent }),
+      });
 
-    const client = new Client({ name: "client-via-serve", version: "1.0.0" });
-    await client.connect(new StdioServerTransport(clientOut, clientIn));
+      const client = new Client({ name: "client-via-serve", version: "1.0.0" });
+      await client.connect(new StdioServerTransport(clientOut, clientIn));
 
-    const listRes = await client.callTool({ name: "list_projects", arguments: {} });
-    expect(listRes.isError).toBeFalsy();
+      const listRes = await client.callTool({ name: "list_projects", arguments: {} });
+      expect(listRes.isError).toBeFalsy();
 
-    clientIn.end();
-    await proxy.done;
-    await proxy.close();
-    await runningHttpServer.close();
+      clientIn.end();
+      await proxy.done;
+      await proxy.close();
+      await runningHttpServer.close();
+    } finally {
+      release();
+    }
   });
 
   it("host with a connected client socket closes promptly and cleans up socket file", async () => {
