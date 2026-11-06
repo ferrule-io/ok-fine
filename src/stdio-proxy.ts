@@ -84,14 +84,43 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
   let activeHost: RunningLocalHost | null = null;
   let activeLockRelease: (() => void) | null = null;
 
+  interface OutboundItem {
+    line: string;
+    reqId?: string | number;
+  }
+
+  // Invariant: at most one line is in flight in the socket at any time.
+  // Because writes are serialized per socket, an errored write implies the
+  // trailing newline was never delivered, so the host could not have executed it.
+  // Lines still in outboundQueue are provably unsent.
+  let outboundQueue: OutboundItem[] = [];
+  let isWriting = false;
+  let currentWritePromise: Promise<void> | null = null;
+
   /** Drops the current socket and, if this process hosts, closes the host and releases the lock. */
   async function teardownActive(): Promise<void> {
+    if (outboundQueue.length > 0) {
+      const unsent = outboundQueue.splice(0, outboundQueue.length);
+      for (const item of unsent) {
+        if (item.reqId !== undefined) {
+          inFlightRequests.delete(item.reqId);
+        }
+      }
+      pendingStdinLines.unshift(...unsent.map((u) => u.line));
+    }
+
     const socket = activeSocket;
     activeSocket = null;
     if (socket) {
       socket.removeAllListeners();
       socket.destroy();
     }
+
+    if (currentWritePromise) {
+      await currentWritePromise;
+    }
+    isWriting = false;
+
     const host = activeHost;
     activeHost = null;
     if (host) await host.close().catch((err: unknown) => log.error({ err }, "closing local host failed"));
@@ -103,7 +132,6 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
   let storedInitialized: string | null = null;
   const inFlightRequests = new Map<string | number, string | number>();
   const pendingStdinLines: string[] = [];
-
   let replaySeq = 0;
   let awaitingReplayId: string | null = null;
   let onReplayResponse: (() => void) | null = null;
@@ -151,33 +179,45 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
     throw new Error(`Timed out waiting for ok-fine host on ${config.dataDir} after ${timeoutStr}${hint}`);
   }
 
-  function sendSocketLine(socket: net.Socket, line: string): void {
-    let msg: z.infer<typeof JsonRpcMessageSchema> | null = null;
-    try {
-      const parsed = JsonRpcMessageSchema.safeParse(JSON.parse(line));
-      if (parsed.success) msg = parsed.data;
-    } catch {
-      // Non-JSON line
+  function flushOutbound(): void {
+    if (isWriting) return;
+    if (!activeSocket || activeSocket.destroyed || !activeSocket.writable) return;
+    if (isReconnecting || shuttingDown) return;
+    const item = outboundQueue.shift();
+    if (!item) return;
+    isWriting = true;
+
+    if (item.reqId !== undefined) {
+      inFlightRequests.set(item.reqId, item.reqId);
     }
 
-    const reqId = msg?.id !== undefined && msg?.method !== undefined ? msg.id : undefined;
-    if (reqId !== undefined) {
-      inFlightRequests.set(reqId, reqId);
-    }
+    const { promise, resolve } = Promise.withResolvers<void>();
+    currentWritePromise = promise;
 
-    socket.write(`${line}\n`, (err) => {
-      if (err) {
-        if (reqId !== undefined) {
-          if (inFlightRequests.has(reqId)) {
-            inFlightRequests.delete(reqId);
-            pendingStdinLines.push(line);
+    const socket = activeSocket;
+    socket.write(`${item.line}\n`, (err) => {
+      const writing = item;
+      currentWritePromise = null;
+      isWriting = false;
+      try {
+        if (err) {
+          if (writing.reqId !== undefined) {
+            // Requeue only if not already answered by handleSocketClose
+            if (inFlightRequests.has(writing.reqId)) {
+              inFlightRequests.delete(writing.reqId);
+              pendingStdinLines.unshift(writing.line);
+            }
+          } else if (isReconnecting || !isFailingOver) {
+            pendingStdinLines.unshift(writing.line);
           }
-        } else if (isReconnecting || !isFailingOver) {
-          pendingStdinLines.push(line);
+          if (!isFailingOver && !shuttingDown) {
+            void handleSocketClose();
+          }
+        } else {
+          flushOutbound();
         }
-        if (!isFailingOver && !shuttingDown) {
-          void handleSocketClose();
-        }
+      } finally {
+        resolve();
       }
     });
   }
@@ -199,10 +239,13 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
       }
     }
 
+    const reqId = msg?.id !== undefined && msg?.method !== undefined ? msg.id : undefined;
+
     if (isReconnecting || !activeSocket || activeSocket.destroyed || !activeSocket.writable) {
       pendingStdinLines.push(line);
     } else {
-      sendSocketLine(activeSocket, line);
+      outboundQueue.push({ line, reqId });
+      flushOutbound();
     }
   }
 
@@ -357,11 +400,7 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
       isReconnecting = false;
       const queued = pendingStdinLines.splice(0, pendingStdinLines.length);
       for (const q of queued) {
-        if (connectedSocket && !connectedSocket.destroyed && connectedSocket.writable) {
-          sendSocketLine(connectedSocket, q);
-        } else {
-          pendingStdinLines.push(q);
-        }
+        handleStdinLine(q);
       }
     } catch (err) {
       log.error({ err }, "proxy failover failed");
@@ -386,7 +425,8 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
     shuttingDown = true;
 
     stdin.off("data", onStdinData);
-
+    outboundQueue = [];
+    pendingStdinLines.length = 0;
     if (activeSocket) {
       activeSocket.removeAllListeners();
       activeSocket.destroy();

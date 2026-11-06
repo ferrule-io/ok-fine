@@ -232,6 +232,191 @@ describe("stdio proxy and shared sessions", () => {
     }
   });
 
+  it("serializes socket writes: delivered request gets -32603 while queued request is replayed to next host", async () => {
+    const dummyDir = await mkdtemp(join(tmpdir(), "okf-"));
+    const endpoint = localEndpointPath(dummyDir);
+
+    const { promise: connected1, resolve: resolveConnected1 } = Promise.withResolvers<net.Socket>();
+    const server1 = net.createServer((socket) => {
+      resolveConnected1(socket);
+    });
+
+    const { promise: listenPromise1, resolve: resolveListen1, reject: rejectListen1 } = Promise.withResolvers<void>();
+    server1.once("error", rejectListen1);
+    server1.listen(endpoint, () => {
+      server1.off("error", rejectListen1);
+      resolveListen1();
+    });
+    await listenPromise1;
+
+    const clientIn = new PassThrough();
+    const clientOut = new PassThrough();
+
+    // Lock dummyDir so the proxy acts as follower
+    const dummyHostLock = await tryLockDataDir(dummyDir);
+    expect(dummyHostLock.acquired).toBe(true);
+
+    let server2: net.Server | undefined;
+    let proxy: RunningStdioProxy | undefined;
+
+    try {
+      proxy = await startStdioProxy({
+        config: loadStorageConfig({ DATA_DIR: dummyDir, LOG_LEVEL: "silent" }),
+        identity: "tester@example.com",
+        log: silent,
+        stdin: clientIn,
+        stdout: clientOut,
+        electionTimeoutMs: 2000,
+        startHost: async () => {
+          const {
+            promise: listenPromise2,
+            resolve: resolveListen2,
+            reject: rejectListen2,
+          } = Promise.withResolvers<void>();
+          server2 = net.createServer((socket) => {
+            let buf = "";
+            socket.on("data", (chunk) => {
+              buf += chunk.toString("utf8");
+              while (true) {
+                const idx = buf.indexOf("\n");
+                if (idx === -1) break;
+                const line = buf.slice(0, idx).trim();
+                buf = buf.slice(idx + 1);
+                if (!line) continue;
+                const parsed = JSON.parse(line);
+                if (parsed.okFine) continue; // hello
+                if (parsed.method === "initialize") {
+                  socket.write(
+                    `${JSON.stringify({
+                      jsonrpc: "2.0",
+                      id: parsed.id,
+                      result: { protocolVersion: "2025-11-25" },
+                    })}\n`,
+                  );
+                } else if (parsed.method === "notifications/initialized") {
+                  // notification
+                } else if (parsed.id !== undefined) {
+                  socket.write(
+                    `${JSON.stringify({
+                      jsonrpc: "2.0",
+                      id: parsed.id,
+                      result: { replayed: true },
+                    })}\n`,
+                  );
+                }
+              }
+            });
+          });
+          server2.once("error", rejectListen2);
+          server2.listen(endpoint, () => {
+            server2?.off("error", rejectListen2);
+            resolveListen2();
+          });
+          await listenPromise2;
+          return {
+            endpointPath: endpoint,
+            close: async () => {
+              server2?.close();
+            },
+          };
+        },
+      });
+
+      const server1Socket = await connected1;
+      let buf1 = "";
+      const { promise: req1Received, resolve: resolveReq1Received } = Promise.withResolvers<void>();
+
+      server1Socket.on("data", (chunk) => {
+        buf1 += chunk.toString("utf8");
+        while (true) {
+          const idx = buf1.indexOf("\n");
+          if (idx === -1) break;
+          const line = buf1.slice(0, idx).trim();
+          buf1 = buf1.slice(idx + 1);
+          if (!line) continue;
+          const parsed = JSON.parse(line);
+          if (parsed.id === 1) {
+            server1Socket.write(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: 1,
+                result: { protocolVersion: "2025-11-25" },
+              })}\n`,
+            );
+          } else if (parsed.id === 101) {
+            resolveReq1Received();
+          }
+        }
+      });
+
+      // Initialize client first so initialize replay is configured
+      clientIn.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: { protocolVersion: "2025-11-25" },
+        })}\n`,
+      );
+      const initResp = JSON.parse(await readLine(clientOut));
+      expect(initResp).toMatchObject({ id: 1, result: { protocolVersion: "2025-11-25" } });
+      clientIn.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+      // Send first request from client
+      clientIn.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 101,
+          method: "tools/call",
+          params: { name: "test_tool_1", arguments: {} },
+        })}\n`,
+      );
+
+      // Wait until dummy server 1 has completely received request 1 (101)
+      await req1Received;
+
+      if (dummyHostLock.acquired) dummyHostLock.release();
+      server1.close();
+      server1Socket.destroy();
+
+      // Send second request from client while socket is dropped
+      clientIn.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 102,
+          method: "tools/call",
+          params: { name: "test_tool_2", arguments: {} },
+        })}\n`,
+      );
+
+      // Read responses from clientOut
+      const responses: Array<{ id: number; error?: { code: number; message: string }; result?: unknown }> = [];
+      responses.push(JSON.parse(await readLine(clientOut)));
+      responses.push(JSON.parse(await readLine(clientOut)));
+      // Request 1 was delivered to server 1, so it gets the ambiguous -32603 restart error
+      const resp101 = responses.find((r) => r.id === 101);
+      expect(resp101).toBeDefined();
+      expect(resp101?.error).toMatchObject({
+        code: -32603,
+        message: "ok-fine host restarted; retry the request",
+      });
+
+      // Request 2 was unsent / write-errored, so it was NOT answered with -32603, but replayed to server 2
+      const resp102 = responses.find((r) => r.id === 102);
+      expect(resp102).toBeDefined();
+      expect(resp102?.error).toBeUndefined();
+      expect(resp102?.result).toEqual({ replayed: true });
+
+      // Exactly one response per id
+      expect(responses).toHaveLength(2);
+    } finally {
+      clientIn.end();
+      if (proxy) await proxy.close();
+      server1.close();
+      server2?.close();
+      if (dummyHostLock.acquired) dummyHostLock.release();
+    }
+  });
+
   it("hello identity reaches the principal for actor validation", async () => {
     const config = loadStorageConfig({ DATA_DIR: dataDir, LOG_LEVEL: "silent" });
 
