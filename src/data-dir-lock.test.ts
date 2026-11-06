@@ -139,6 +139,28 @@ describe("lockDataDir", () => {
     const takeoverFiles = entries.filter((e) => e.startsWith("ok-fine.lock.takeover-"));
     expect(takeoverFiles).toHaveLength(0);
   });
+  it("takes over stale lock when generations 0..11 all have dead holders and cleans up guards", async () => {
+    const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+    await writeFile(lockPath, `${deadPid}\n`);
+    const tenSecondsAgo = new Date(Date.now() - 10_000);
+    await utimes(lockPath, tenSecondsAgo, tenSecondsAgo);
+
+    const stats = await stat(lockPath, { bigint: true });
+    const lockKey = `${stats.ino}-${stats.mtimeNs}`;
+    for (let gen = 0; gen < 12; gen++) {
+      await writeFile(join(dataDir, `ok-fine.lock.takeover-${lockKey}.${gen}`), `${deadPid}\n`);
+    }
+
+    const result = await tryLockDataDir(dataDir);
+    expect(result.acquired).toBe(true);
+    if (!result.acquired) throw new Error("expected lock to be acquired");
+    result.release();
+
+    expect(await pathExists(lockPath)).toBe(false);
+    const entries = await readdir(dataDir);
+    const takeoverFiles = entries.filter((e) => e.startsWith("ok-fine.lock.takeover-"));
+    expect(takeoverFiles).toHaveLength(0);
+  });
 
   it("serializes concurrent stale takeover so exactly one process acquires", async () => {
     const lockModuleUrl = new URL("./data-dir-lock.ts", import.meta.url).href;

@@ -141,7 +141,7 @@ async function cleanupOldTakeoverGuards(dataDir: string, currentKey: string | nu
 
 const STALE_THRESHOLD_MS = 3000;
 const MAX_LOCK_ATTEMPTS = 10;
-const MAX_TAKEOVER_GENS = 8;
+const MAX_TAKEOVER_GENS = 10_000;
 
 /**
  * Attempts to acquire the exclusive per-data-dir lock without throwing.
@@ -229,7 +229,10 @@ async function doTryLockDataDir(dataDir: string, canonicalDir: string): Promise<
     let rightHeld = false;
     let guardContention = false;
 
-    for (let gen = 0; gen < MAX_TAKEOVER_GENS; gen++) {
+    for (let gen = 0; ; gen++) {
+      if (gen >= MAX_TAKEOVER_GENS) {
+        throw new Error(`Exceeded takeover generation scan limit (${MAX_TAKEOVER_GENS}) for lock key ${lockKey}`);
+      }
       const guardPath = join(dataDir, `ok-fine.lock.takeover-${lockKey}.${gen}`);
       try {
         await writeFile(guardPath, `${pid}\n`, { flag: "wx" });
@@ -285,9 +288,11 @@ async function doTryLockDataDir(dataDir: string, canonicalDir: string): Promise<
     // 1. Takeover rights are strictly keyed to a specific stale lock inode+mtimeNs instance.
     // 2. An exclusive right to remove that instance is granted to generation k if and only if
     //    all generations 0..k-1 exist with dead holders (or invalid content >3s old), and gen k
-    //    is atomically created with `wx`. Guards are immutable and never unlinked for recovery.
-    // 3. Right-holder re-verifies inode+mtimeNs before unlinking the stale lock.
-    // 4. Residual assumption: a dead holder PID is not recycled by the OS within the microsecond
+    //    is atomically created with `wx` (or already held by own pid). Guards are immutable and never unlinked for recovery.
+    // 3. Generations scan upward without a fixed cap past dead generations until a `wx` create
+    //    succeeds (right held) or a live/fresh holder is encountered (contention).
+    // 4. Right-holder re-verifies inode+mtimeNs before unlinking the stale lock.
+    // 5. Residual assumption: a dead holder PID is not recycled by the OS within the microsecond
     //    window before the next generation guard is established.
     const currentLock = await readLockState(lockPath, canonicalDir);
     if (
