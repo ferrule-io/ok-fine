@@ -151,6 +151,37 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
     throw new Error(`Timed out waiting for ok-fine host on ${config.dataDir} after ${timeoutStr}${hint}`);
   }
 
+  function sendSocketLine(socket: net.Socket, line: string): void {
+    let msg: z.infer<typeof JsonRpcMessageSchema> | null = null;
+    try {
+      const parsed = JsonRpcMessageSchema.safeParse(JSON.parse(line));
+      if (parsed.success) msg = parsed.data;
+    } catch {
+      // Non-JSON line
+    }
+
+    const reqId = msg?.id !== undefined && msg?.method !== undefined ? msg.id : undefined;
+    if (reqId !== undefined) {
+      inFlightRequests.set(reqId, reqId);
+    }
+
+    socket.write(`${line}\n`, (err) => {
+      if (err) {
+        if (reqId !== undefined) {
+          if (inFlightRequests.has(reqId)) {
+            inFlightRequests.delete(reqId);
+            pendingStdinLines.push(line);
+          }
+        } else if (isReconnecting || !isFailingOver) {
+          pendingStdinLines.push(line);
+        }
+        if (!isFailingOver && !shuttingDown) {
+          void handleSocketClose();
+        }
+      }
+    });
+  }
+
   function handleStdinLine(line: string): void {
     let msg: z.infer<typeof JsonRpcMessageSchema> | null = null;
     try {
@@ -166,15 +197,12 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
       } else if (msg.method === "notifications/initialized") {
         storedInitialized = line;
       }
-      if (msg.id !== undefined && msg.method !== undefined) {
-        inFlightRequests.set(msg.id, msg.id);
-      }
     }
 
     if (isReconnecting || !activeSocket || activeSocket.destroyed || !activeSocket.writable) {
       pendingStdinLines.push(line);
     } else {
-      activeSocket.write(`${line}\n`);
+      sendSocketLine(activeSocket, line);
     }
   }
 
@@ -329,7 +357,11 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
       isReconnecting = false;
       const queued = pendingStdinLines.splice(0, pendingStdinLines.length);
       for (const q of queued) {
-        connectedSocket?.write(`${q}\n`);
+        if (connectedSocket && !connectedSocket.destroyed && connectedSocket.writable) {
+          sendSocketLine(connectedSocket, q);
+        } else {
+          pendingStdinLines.push(q);
+        }
       }
     } catch (err) {
       log.error({ err }, "proxy failover failed");
