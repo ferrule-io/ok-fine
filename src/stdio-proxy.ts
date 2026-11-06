@@ -1,4 +1,5 @@
 import net from "node:net";
+import { join } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
@@ -83,14 +84,43 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
   let activeHost: RunningLocalHost | null = null;
   let activeLockRelease: (() => void) | null = null;
 
+  interface OutboundItem {
+    line: string;
+    reqId?: string | number;
+  }
+
+  // Invariant: at most one line is in flight in the socket at any time.
+  // Because writes are serialized per socket, an errored write implies the
+  // trailing newline was never delivered, so the host could not have executed it.
+  // Lines still in outboundQueue are provably unsent.
+  let outboundQueue: OutboundItem[] = [];
+  let isWriting = false;
+  let currentWritePromise: Promise<void> | null = null;
+
   /** Drops the current socket and, if this process hosts, closes the host and releases the lock. */
   async function teardownActive(): Promise<void> {
+    if (outboundQueue.length > 0) {
+      const unsent = outboundQueue.splice(0, outboundQueue.length);
+      for (const item of unsent) {
+        if (item.reqId !== undefined) {
+          inFlightRequests.delete(item.reqId);
+        }
+      }
+      pendingStdinLines.unshift(...unsent.map((u) => u.line));
+    }
+
     const socket = activeSocket;
     activeSocket = null;
     if (socket) {
       socket.removeAllListeners();
       socket.destroy();
     }
+
+    if (currentWritePromise) {
+      await currentWritePromise;
+    }
+    isWriting = false;
+
     const host = activeHost;
     activeHost = null;
     if (host) await host.close().catch((err: unknown) => log.error({ err }, "closing local host failed"));
@@ -102,12 +132,12 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
   let storedInitialized: string | null = null;
   const inFlightRequests = new Map<string | number, string | number>();
   const pendingStdinLines: string[] = [];
-
   let replaySeq = 0;
   let awaitingReplayId: string | null = null;
   let onReplayResponse: (() => void) | null = null;
 
   async function runElection(deadline: number): Promise<net.Socket> {
+    let unreachableHolder: number | null = null;
     while (Date.now() < deadline && !shuttingDown) {
       const lockRes = await tryLockDataDir(config.dataDir);
       if (lockRes.acquired) {
@@ -128,14 +158,68 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
       }
 
       const holderPid = lockRes.holderPid;
+      unreachableHolder = null;
       if (holderPid !== null && isProcessAlive(holderPid)) {
+        const socket = await tryConnectSocket(endpoint);
+        if (socket) return socket;
+        unreachableHolder = holderPid;
+      } else if (holderPid === null) {
+        // Lock acquisition encountered contention or in-flight write.
+        // A host may already be listening on the endpoint; probe before backing off.
         const socket = await tryConnectSocket(endpoint);
         if (socket) return socket;
       }
       await sleep(50);
     }
     const timeoutStr = timeoutMs % 1000 === 0 ? `${timeoutMs / 1000}s` : `${timeoutMs}ms`;
-    throw new Error(`Timed out waiting for ok-fine host on ${config.dataDir} after ${timeoutStr}`);
+    const hint =
+      unreachableHolder === null
+        ? ""
+        : `: pid ${unreachableHolder} holds ${join(config.dataDir, "ok-fine.lock")} but does not accept connections on ${endpoint}; if it is a stuck ok-fine process, stop it`;
+    throw new Error(`Timed out waiting for ok-fine host on ${config.dataDir} after ${timeoutStr}${hint}`);
+  }
+
+  function flushOutbound(): void {
+    if (isWriting) return;
+    if (!activeSocket || activeSocket.destroyed || !activeSocket.writable) return;
+    if (isReconnecting || shuttingDown) return;
+    const item = outboundQueue.shift();
+    if (!item) return;
+    isWriting = true;
+
+    if (item.reqId !== undefined) {
+      inFlightRequests.set(item.reqId, item.reqId);
+    }
+
+    const { promise, resolve } = Promise.withResolvers<void>();
+    currentWritePromise = promise;
+
+    const socket = activeSocket;
+    socket.write(`${item.line}\n`, (err) => {
+      const writing = item;
+      currentWritePromise = null;
+      isWriting = false;
+      try {
+        if (err) {
+          if (writing.reqId !== undefined) {
+            // Requeue only if not already answered by handleSocketClose
+            if (inFlightRequests.has(writing.reqId)) {
+              inFlightRequests.delete(writing.reqId);
+              pendingStdinLines.unshift(writing.line);
+            }
+          } else if (isReconnecting || !isFailingOver) {
+            pendingStdinLines.unshift(writing.line);
+          }
+          if (!isFailingOver && !shuttingDown) {
+            void handleSocketClose();
+          }
+        } else {
+          flushOutbound();
+        }
+      } finally {
+        resolve();
+      }
+    });
   }
 
   function handleStdinLine(line: string): void {
@@ -153,15 +237,15 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
       } else if (msg.method === "notifications/initialized") {
         storedInitialized = line;
       }
-      if (msg.id !== undefined && msg.method !== undefined) {
-        inFlightRequests.set(msg.id, msg.id);
-      }
     }
+
+    const reqId = msg?.id !== undefined && msg?.method !== undefined ? msg.id : undefined;
 
     if (isReconnecting || !activeSocket || activeSocket.destroyed || !activeSocket.writable) {
       pendingStdinLines.push(line);
     } else {
-      activeSocket.write(`${line}\n`);
+      outboundQueue.push({ line, reqId });
+      flushOutbound();
     }
   }
 
@@ -224,7 +308,6 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
 
     try {
       await teardownActive();
-
       // Answer every in-flight request with host restart error
       for (const id of inFlightRequests.values()) {
         const errorResponse = {
@@ -309,7 +392,6 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
           await sleep(50);
         }
       }
-
       if (!connectedSocket && !shuttingDown) {
         const timeoutStr = timeoutMs % 1000 === 0 ? `${timeoutMs / 1000}s` : `${timeoutMs}ms`;
         throw new Error(`Timed out waiting for ok-fine host on ${config.dataDir} after ${timeoutStr}`);
@@ -318,7 +400,7 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
       isReconnecting = false;
       const queued = pendingStdinLines.splice(0, pendingStdinLines.length);
       for (const q of queued) {
-        connectedSocket?.write(`${q}\n`);
+        handleStdinLine(q);
       }
     } catch (err) {
       log.error({ err }, "proxy failover failed");
@@ -343,7 +425,8 @@ export async function startStdioProxy(options: StdioProxyOptions): Promise<Runni
     shuttingDown = true;
 
     stdin.off("data", onStdinData);
-
+    outboundQueue = [];
+    pendingStdinLines.length = 0;
     if (activeSocket) {
       activeSocket.removeAllListeners();
       activeSocket.destroy();
